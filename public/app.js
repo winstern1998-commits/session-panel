@@ -98,7 +98,8 @@ const els = {
   closeImport: $("#closeImport"),
   closeRemote: $("#closeRemote"),
   summary: $("#summary"),
-  board: $("#board"),
+  tabList: $("#tabList"),
+  detailPanel: $("#detailPanel"),
   settingsOverlay: $("#settingsOverlay"),
   closeSettings: $("#closeSettings"),
   baseUrl: $("#baseUrl"),
@@ -117,6 +118,7 @@ function loadState() {
     tracked: [],
     theme: "dark",
     expandedLanes: [],
+    selectedSession: null,
   };
   try {
     const loaded = { ...fallback, ...JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") };
@@ -125,6 +127,7 @@ function loadState() {
     if (!Array.isArray(loaded.tracked)) loaded.tracked = [];
     if (!["dark", "light"].includes(loaded.theme)) loaded.theme = fallback.theme;
     if (!Array.isArray(loaded.expandedLanes)) loaded.expandedLanes = [];
+    if (typeof loaded.selectedSession !== "string") loaded.selectedSession = null;
     return loaded;
   } catch {
     return fallback;
@@ -139,6 +142,7 @@ function saveState() {
       tracked: [...tracked.values()],
       theme: state.theme,
       expandedLanes: [...expandedLanes],
+      selectedSession: state.selectedSession,
     })
   );
 }
@@ -544,11 +548,11 @@ async function loadRemoteSessions() {
    Rendering
    ============================================================ */
 function renderSignature() {
-  const parts = [];
+  const parts = [state.selectedSession || "", "\n"];
   for (const [id, item] of tracked) {
     const snap = snapshots.get(id);
     parts.push(id, "\t", item.lane || "", "\t", item.note || "", "\t",
-      item.importedAt, "\t", expandedLanes.has(item.lane || "默认主线") ? "1" : "0");
+      item.importedAt);
     if (snap) {
       parts.push("\t", snap.session?.title || "",
         "\t", JSON.stringify(snap.status || null),
@@ -567,121 +571,100 @@ function renderBoard() {
   if (sig === lastRenderSig) return;
   lastRenderSig = sig;
 
-  els.board.innerHTML = "";
+  els.tabList.innerHTML = "";
+  els.detailPanel.innerHTML = "";
 
   if (!tracked.size) {
-    els.board.innerHTML = `
-      <div class="board-empty">
+    els.tabList.innerHTML = `<p class="tab-list-empty">暂无 session</p>`;
+    els.detailPanel.innerHTML = `
+      <div class="detail-empty">
         <h3>还没有跟踪任何 session</h3>
         <p>点击顶部「导入」输入 session ID，或点击「远端」从 opencode 拉取列表后一键加入。</p>
       </div>
     `;
     renderSummary(0, 0, 0, 0, 0);
-    els.board.classList.add("board-ready");
+    els.detailPanel.classList.add("board-ready");
     return;
   }
 
-  // Group by lane, sort lanes alphabetically, items by importedAt.
-  const groups = new Map();
-  const counts = { working: 0, retrying: 0, idle: 0 };
-
-  const items = [...tracked.values()].sort((a, b) => {
-    const laneA = a.lane || "默认主线";
-    const laneB = b.lane || "默认主线";
-    if (laneA !== laneB) return laneA.localeCompare(laneB);
-    const snapA = snapshots.get(a.id);
-    const snapB = snapshots.get(b.id);
-    const busyA = classifyStatus(snapA?.status).busy;
-    const busyB = classifyStatus(snapB?.status).busy;
-    if (busyA !== busyB) return busyA ? -1 : 1;
-    if (busyA) return a.importedAt - b.importedAt;
-    const endA = snapA?.lastBusyEnd || a.importedAt;
-    const endB = snapB?.lastBusyEnd || b.importedAt;
-    return endB - endA;
-  });
-
-  for (const item of items) {
+  // Sort: busy first (working > retrying > idle), then by importedAt within
+  // the same status.
+  const statusRank = { working: 0, retrying: 1, idle: 2 };
+  const items = [...tracked.values()].map((item) => {
     const snapshot = snapshots.get(item.id);
     const status = classifyStatus(snapshot?.status);
-    counts[status.kind] += 1;
-    const lane = item.lane || "默认主线";
-    if (!groups.has(lane)) groups.set(lane, []);
-    groups.get(lane).push({ item, snapshot, status });
+    return { item, snapshot, status };
+  }).sort((a, b) => {
+    const ra = statusRank[a.status.kind] ?? 3;
+    const rb = statusRank[b.status.kind] ?? 3;
+    if (ra !== rb) return ra - rb;
+    return a.item.importedAt - b.item.importedAt;
+  });
+
+  const counts = { working: 0, retrying: 0, idle: 0 };
+  for (const entry of items) counts[entry.status.kind] += 1;
+
+  // Auto-select: if none selected, or selected no longer tracked, pick the
+  // first item (top of the sorted list — usually the busiest session).
+  if (!state.selectedSession || !tracked.has(state.selectedSession)) {
+    state.selectedSession = items[0].item.id;
+    saveState();
   }
 
-  for (const [lane, entries] of groups) {
-    const expanded = expandedLanes.has(lane);
-    const group = document.createElement("section");
-    group.className = "lane-group";
-    group.innerHTML = `
-      <div class="lane-head">
-        <button class="lane-toggle" type="button" aria-expanded="${expanded}">${expanded ? "折叠" : "展开"}</button>
-        <h2>${escapeHtml(lane)}</h2>
-        <span class="lane-line"></span>
-        <span class="lane-count">${entries.length}</span>
+  renderTabList(items);
+  const selected = items.find((entry) => entry.item.id === state.selectedSession);
+  if (selected) {
+    els.detailPanel.append(renderDetail(selected.item, selected.snapshot, selected.status));
+  } else {
+    els.detailPanel.innerHTML = `
+      <div class="detail-empty">
+        <h3>选择左侧的 session 查看详情</h3>
+        <p>点击左侧任意一个 tab 即可展开该 session 的完整信息。</p>
       </div>
     `;
-    const toggleBtn = group.querySelector(".lane-toggle");
-    toggleBtn.addEventListener("click", () => {
-      const willExpand = !expandedLanes.has(lane);
-      if (willExpand) expandedLanes.add(lane);
-      else expandedLanes.delete(lane);
-      saveState();
-      // Toggle in place so the CSS collapse transition can run instead of a
-      // full re-render that would snap the cards into their new state.
-      toggleBtn.textContent = willExpand ? "折叠" : "展开";
-      toggleBtn.setAttribute("aria-expanded", String(willExpand));
-      for (const card of grid.querySelectorAll(".session-card")) {
-        card.classList.toggle("collapsed", !willExpand);
-      }
-    });
-    const grid = document.createElement("div");
-    grid.className = "card-grid";
-    for (const entry of entries) {
-      grid.append(renderCard(entry.item, entry.snapshot, entry.status, expanded, lane));
-    }
-    group.append(grid);
-    els.board.append(group);
   }
 
   renderSummary(tracked.size, counts.working, counts.retrying, counts.idle);
   syncRemoteStatusesFromSnapshots();
-  els.board.classList.add("board-ready");
+  els.detailPanel.classList.add("board-ready");
 }
 
-function syncRemoteStatusesFromSnapshots() {
-  for (const node of els.remoteSessions.querySelectorAll(".remote-item")) {
-    const id = node.dataset.id;
-    const snapshot = snapshots.get(id);
-    if (!snapshot) continue;
-    const status = classifyStatus(snapshot.status);
-    const tag = node.querySelector(".remote-status");
-    if (!tag) continue;
-    tag.classList.remove("working", "retrying", "idle");
-    tag.classList.add(status.kind);
-    tag.textContent = status.label;
+function renderTabList(items) {
+  for (const { item, status } of items) {
+    const snapshot = snapshots.get(item.id);
+    const session = snapshot?.session || {};
+    const title = session.title || item.id;
+    const lane = item.lane || "默认主线";
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = "tab-item";
+    tab.dataset.id = item.id;
+    tab.setAttribute("aria-selected", String(item.id === state.selectedSession));
+    tab.innerHTML = `
+      <span class="tab-dot ${status.kind}"></span>
+      <span class="tab-title">${escapeHtml(title)}</span>
+      <span class="tab-lane">${escapeHtml(lane)}</span>
+    `;
+    tab.addEventListener("click", () => {
+      if (state.selectedSession === item.id) return;
+      state.selectedSession = item.id;
+      saveState();
+      renderBoard();
+    });
+    els.tabList.append(tab);
   }
 }
 
-function renderSummary(total, working, retrying, idle) {
-  els.summary.innerHTML = `
-    <span class="chip tracked"><strong>${total}</strong> tracked</span>
-    <span class="chip working"><span class="swatch working"></span><strong>${working}</strong> working</span>
-    <span class="chip retrying"><span class="swatch retrying"></span><strong>${retrying}</strong> retrying</span>
-    <span class="chip idle"><span class="swatch idle"></span><strong>${idle}</strong> idle</span>
-  `;
-}
-
-function renderCard(item, snapshot, status, expanded, lane) {
+function renderDetail(item, snapshot, status) {
   const session = snapshot?.session || {};
   const title = session.title || item.id;
+  const lane = item.lane || "默认主线";
   const card = document.createElement("article");
-  const cardCollapsed = !expanded;
-  card.className = cardCollapsed ? "session-card collapsed" : "session-card";
+  card.className = "session-card";
   card.dataset.id = item.id;
   card.dataset.status = status.kind;
 
-  const todos = (snapshot?.todos || []).slice(0, 4);
+  const todos = snapshot?.todos || [];
   const todoHtml = todos.length
     ? todos
         .map((todo) => {
@@ -710,27 +693,31 @@ function renderCard(item, snapshot, status, expanded, lane) {
         <input class="title-input" value="${escapeHtml(title)}" />
         <p class="session-id">${escapeHtml(item.id)}</p>
       </div>
-      <button class="card-remove" title="仅从面板移除，不中止会话">✕</button>
     </div>
-    <div class="card-details">
-      <div class="card-details-inner">
-        <div class="meta-row">
-          <span class="updated">${escapeHtml(updated)}</span>
-        </div>
-        <p class="note">${escapeHtml(item.note || "")}</p>
-        ${lastMsg}
-        <div class="todo-list">${todoHtml}</div>
-        <div class="card-actions">
-          <button class="btn ghost sm act-save">改名</button>
-          <button class="btn ghost sm act-notify">提醒 OK</button>
-        </div>
-      </div>
+    <div class="meta-row">
+      <span class="tag lane">${escapeHtml(lane)}</span>
+      <span class="updated">${escapeHtml(updated)}</span>
+    </div>
+    <p class="note">${escapeHtml(item.note || "")}</p>
+    <div>
+      <div class="detail-section-label">最近消息</div>
+      ${lastMsg}
+    </div>
+    <div>
+      <div class="detail-section-label">Todos · ${todos.length}</div>
+      <div class="todo-list">${todoHtml}</div>
+    </div>
+    <div class="card-actions">
+      <button class="btn ghost sm act-save">改名</button>
+      <button class="btn ghost sm act-notify">提醒 OK</button>
+      <button class="btn danger sm act-remove">移除</button>
     </div>
   `;
 
-  card.querySelector(".card-remove").addEventListener("click", () => {
+  card.querySelector(".act-remove").addEventListener("click", () => {
     tracked.delete(item.id);
     snapshots.delete(item.id);
+    if (state.selectedSession === item.id) state.selectedSession = null;
     saveState();
     renderBoard();
   });
@@ -754,26 +741,30 @@ function renderCard(item, snapshot, status, expanded, lane) {
     notifyOk(snapshot || { session: { id: item.id, title } }, true);
   });
 
-  const toggleCollapse = (e) => {
-    if (e.target.closest(".title-input, .card-remove")) return;
-    const willExpand = !expandedLanes.has(lane);
-    if (willExpand) expandedLanes.add(lane);
-    else expandedLanes.delete(lane);
-    saveState();
-    const laneGroup = card.closest(".lane-group");
-    const toggleBtn = laneGroup?.querySelector(".lane-toggle");
-    if (toggleBtn) {
-      toggleBtn.textContent = willExpand ? "折叠" : "展开";
-      toggleBtn.setAttribute("aria-expanded", String(willExpand));
-    }
-    for (const c of laneGroup?.querySelectorAll(".session-card") || []) {
-      c.classList.toggle("collapsed", !willExpand);
-    }
-  };
-  card.querySelector(".card-top").addEventListener("click", toggleCollapse);
-  card.querySelector(".meta-row")?.addEventListener("click", toggleCollapse);
-
   return card;
+}
+
+function syncRemoteStatusesFromSnapshots() {
+  for (const node of els.remoteSessions.querySelectorAll(".remote-item")) {
+    const id = node.dataset.id;
+    const snapshot = snapshots.get(id);
+    if (!snapshot) continue;
+    const status = classifyStatus(snapshot.status);
+    const tag = node.querySelector(".remote-status");
+    if (!tag) continue;
+    tag.classList.remove("working", "retrying", "idle");
+    tag.classList.add(status.kind);
+    tag.textContent = status.label;
+  }
+}
+
+function renderSummary(total, working, retrying, idle) {
+  els.summary.innerHTML = `
+    <span class="chip tracked"><strong>${total}</strong> tracked</span>
+    <span class="chip working"><span class="swatch working"></span><strong>${working}</strong> working</span>
+    <span class="chip retrying"><span class="swatch retrying"></span><strong>${retrying}</strong> retrying</span>
+    <span class="chip idle"><span class="swatch idle"></span><strong>${idle}</strong> idle</span>
+  `;
 }
 
 /* ============================================================
