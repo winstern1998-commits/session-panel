@@ -89,7 +89,9 @@ class OpenCodePanelHandler(BaseHTTPRequestHandler):
 
     def handle_sessions(self) -> None:
         try:
-            sessions = self.opencode_json("/session")
+            params = parse_qs(urlparse(self.path).query)
+            directory = params.get("directory", [None])[0]
+            sessions = self.opencode_json("/session", directory=directory)
             status = self.collect_statuses(sessions)
             self.send_json({"sessions": sessions, "status": status})
         except Exception as exc:

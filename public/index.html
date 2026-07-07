@@ -87,8 +87,15 @@
               <button class="btn ghost sm" id="closeRemote" title="收起">收起</button>
             </div>
           </div>
+          <div class="watch-dirs">
+            <div class="watch-dirs-row">
+              <input id="watchDirInput" placeholder="关注目录，如 /mnt/d/Note/notes_vault" autocomplete="off" />
+              <button class="btn ghost sm" id="addWatchDir">添加</button>
+            </div>
+            <div id="watchDirList" class="watch-dirs-list"></div>
+          </div>
           <div id="remoteSessions" class="remote-list">
-            <p class="empty-hint">点击「拉取列表」从 /api/sessions 读取所有远端 session。</p>
+            <p class="empty-hint">点击「拉取列表」从 /api/sessions 读取所有远端 session。添加关注目录可拉取其他 project 的 session。</p>
           </div>
         </section>
 

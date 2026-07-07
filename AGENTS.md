@@ -30,11 +30,25 @@
 - Session detail fetches combine `/session/:id`, `/session/status`, `/session/:id/message?limit=20`, `/session/:id/todo`, and `/session/:id/children`.
 - Other proxied mutations: `PATCH /api/session/:id` → rename; `POST /api/session/:id/abort` → abort session; `POST /api/session/:id/toast` → `/tui/show-toast`.
 
-## OpenCode status scoping gotcha
+## OpenCode API scoping gotchas
 
-- OpenCode 1.17.x scopes `/session/status` **per directory** (InstanceState ScopedCache). A request without `x-opencode-directory` only returns status for the serve process cwd, typically empty.
+OpenCode 1.17.x has **two independent scoping mechanisms** that both affect what the panel can see. Failing to account for either causes silent data loss.
+
+### 1. `/session/status` — per-directory scoped
+
+- Each directory has its own `Map<sessionID, status>` (InstanceState ScopedCache). A request without `x-opencode-directory` only returns status for the serve process cwd, typically empty `{}`.
 - `server.py` `collect_statuses` queries `/session/status` once per unique session directory and merges the maps, so the frontend poll is authoritative for busy/retry state. Do not collapse this into a single status call.
 - Status classification (`app.js` `classifyStatus`): `type === "busy"` → working, `type === "retry"` → retrying, absent → idle.
+
+### 2. `/session` (list) — per-project scoped
+
+- The `/session` list endpoint filters by `projectID`, **not** by directory directly. The server resolves the request's directory → `projectID` via `Project.resolve()`, then runs `WHERE project_id = ?`.
+- A request without `x-opencode-directory` falls back to `process.cwd()` (serve cwd, here `/home/lee`), resolves its `projectID`, and returns only sessions matching that `projectID`.
+- `projectID` resolution priority (from `packages/core/src/project.ts`): git remote URL SHA1 → `.git/opencode` cache file → root commit hash (`git rev-list --max-parents=0 HEAD | sort | head -1`) → `"global"`. Non-git directories and empty git repos (no remote, no commit) fall through to the literal string `"global"`.
+- One `projectID` can span many directories. All non-git directories map to `"global"`, so their sessions share `project_id = "global"` while keeping distinct `directory` values. A git repo's subdirectories share the repo's `projectID`.
+- **Impact on the panel**: `server.py` `handle_sessions` calls `/session` **without** `x-opencode-directory`, so it only receives sessions whose `projectID` equals the serve cwd's `projectID` (here `"global"`). Any session created in a directory that resolves to a different `projectID` (e.g. a standalone git repo like `/mnt/d/Note/notes_vault`, whose `projectID` is its root commit hash) is **invisible** to the "拉取列表" button and to `collect_statuses` (which derives directories from the already-filtered session list).
+- **Verified on 1.17.14**: `GET /session` (no header) → 77 sessions, all `projectID = "global"`. `GET /session` + `x-opencode-directory: /mnt/d/Note/notes_vault` → 87 sessions, all `projectID = b3acc554...` (that repo's root commit). Zero overlap. The target session `ses_0c455bb...` is reachable via `GET /session/:id` but absent from the unscoped list.
+- **Known limitation**: the panel currently has no mechanism to discover all `projectID`s. A fix requires either a user-configured directory watchlist, or an OpenCode API that enumerates projects. The `collect_statuses` directory-derivation logic is built on the false premise that the unscoped `/session` list is complete.
 
 ## Local Networking
 

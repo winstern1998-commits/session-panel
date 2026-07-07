@@ -95,6 +95,9 @@ const els = {
   remoteDrawer: $("#remoteDrawer"),
   loadRemote: $("#loadRemote"),
   remoteSessions: $("#remoteSessions"),
+  watchDirInput: $("#watchDirInput"),
+  addWatchDir: $("#addWatchDir"),
+  watchDirList: $("#watchDirList"),
   closeImport: $("#closeImport"),
   closeRemote: $("#closeRemote"),
   summary: $("#summary"),
@@ -119,6 +122,7 @@ function loadState() {
     theme: "dark",
     expandedLanes: [],
     selectedSession: null,
+    watchDirectories: [],
   };
   try {
     const loaded = { ...fallback, ...JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") };
@@ -128,6 +132,7 @@ function loadState() {
     if (!["dark", "light"].includes(loaded.theme)) loaded.theme = fallback.theme;
     if (!Array.isArray(loaded.expandedLanes)) loaded.expandedLanes = [];
     if (typeof loaded.selectedSession !== "string") loaded.selectedSession = null;
+    if (!Array.isArray(loaded.watchDirectories)) loaded.watchDirectories = [];
     return loaded;
   } catch {
     return fallback;
@@ -143,6 +148,7 @@ function saveState() {
       theme: state.theme,
       expandedLanes: [...expandedLanes],
       selectedSession: state.selectedSession,
+      watchDirectories: state.watchDirectories,
     })
   );
 }
@@ -408,6 +414,9 @@ async function refreshSession(id) {
   if (previous?.lastBusyEnd) snapshot.lastBusyEnd = previous.lastBusyEnd;
   observeStatusTransition(id, previous?.status, snapshot.status, snapshot);
   snapshots.set(id, snapshot);
+  // Auto-track the session's directory so future "拉取列表" covers its project.
+  const dir = snapshot.session?.directory;
+  if (dir) addWatchDirectory(dir);
 }
 
 /* ============================================================
@@ -476,13 +485,78 @@ function isChildSession(session) {
 /* ============================================================
    Remote sessions
    ============================================================ */
+function addWatchDirectory(dir) {
+  dir = (dir || "").trim();
+  if (!dir) return false;
+  if (!state.watchDirectories.includes(dir)) {
+    state.watchDirectories.push(dir);
+    saveState();
+    renderWatchDirs();
+    return true;
+  }
+  return false;
+}
+
+function removeWatchDirectory(dir) {
+  state.watchDirectories = state.watchDirectories.filter((x) => x !== dir);
+  saveState();
+  renderWatchDirs();
+}
+
+function renderWatchDirs() {
+  const dirs = state.watchDirectories || [];
+  els.watchDirList.innerHTML = dirs
+    .map(
+      (d) => `
+      <span class="watch-dir-item">
+        <span class="watch-dir-path" title="${escapeHtml(d)}">${escapeHtml(d)}</span>
+        <button class="watch-dir-remove" data-dir="${escapeHtml(d)}" title="移除">×</button>
+      </span>`
+    )
+    .join("");
+  for (const btn of els.watchDirList.querySelectorAll(".watch-dir-remove")) {
+    btn.addEventListener("click", () => removeWatchDirectory(btn.dataset.dir));
+  }
+}
+
 async function loadRemoteSessions() {
   els.remoteSessions.innerHTML = `<p class="empty-hint">读取中…</p>`;
   try {
-    const { sessions, status } = await api("/api/sessions");
-    const visibleSessions = (sessions || []).filter((session) => !isChildSession(session));
+    // Fetch default (serve cwd project) + each watched directory in parallel,
+    // then merge by session id. OpenCode scopes /session per projectID, so a
+    // single unscoped request only returns the serve cwd's project sessions.
+    const dirs = state.watchDirectories || [];
+    const requests = [
+      api("/api/sessions"),
+      ...dirs.map((d) => api(`/api/sessions?directory=${encodeURIComponent(d)}`)),
+    ];
+    const results = await Promise.allSettled(requests);
+
+    const sessionsMap = new Map();
+    const statusMap = {};
+    let failedCount = 0;
+    for (const result of results) {
+      if (result.status !== "fulfilled") { failedCount++; continue; }
+      const { sessions, status } = result.value;
+      for (const session of sessions || []) {
+        const id = session.id || session.sessionID || session.sessionId;
+        if (id && !sessionsMap.has(id)) sessionsMap.set(id, session);
+      }
+      if (status && typeof status === "object") {
+        for (const [id, s] of Object.entries(status)) {
+          if (!statusMap[id]) statusMap[id] = s;
+        }
+      }
+    }
+
+    const visibleSessions = [...sessionsMap.values()].filter(
+      (session) => !isChildSession(session)
+    );
     if (!visibleSessions.length) {
-      els.remoteSessions.innerHTML = `<p class="empty-hint">远端没有 session。</p>`;
+      const hint = failedCount
+        ? `远端没有 session（${failedCount} 个目录拉取失败）。`
+        : "远端没有 session。";
+      els.remoteSessions.innerHTML = `<p class="empty-hint">${escapeHtml(hint)}</p>`;
       return;
     }
 
@@ -490,7 +564,7 @@ async function loadRemoteSessions() {
     let touchedTracked = false;
     for (const session of visibleSessions) {
       const id = session.id || session.sessionID || session.sessionId;
-      const rawStatus = effectiveRawStatus(id, status?.[id]);
+      const rawStatus = effectiveRawStatus(id, statusMap[id]);
       if (tracked.has(id)) {
         mergeRemoteSnapshot(session, rawStatus);
         touchedTracked = true;
@@ -507,6 +581,7 @@ async function loadRemoteSessions() {
             <span>${escapeHtml(id)}</span>
             <span class="tag remote-status ${statusInfo.kind}">${escapeHtml(statusInfo.label)}</span>
             ${session.agent ? `<span class="tag">${escapeHtml(session.agent)}</span>` : ""}
+            ${session.directory ? `<span class="tag">${escapeHtml(session.directory)}</span>` : ""}
           </p>
         </div>
         <div class="remote-fields">
@@ -944,6 +1019,22 @@ els.loadRemote.addEventListener("click", loadRemoteSessions);
 els.refreshAll.addEventListener("click", () => refreshAll());
 els.enableNotifications.addEventListener("click", enableNotifications);
 
+function handleAddWatchDir() {
+  const dir = els.watchDirInput.value.trim();
+  if (!dir) return;
+  if (addWatchDirectory(dir)) {
+    els.watchDirInput.value = "";
+    loadRemoteSessions();
+  }
+}
+els.addWatchDir.addEventListener("click", handleAddWatchDir);
+els.watchDirInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    handleAddWatchDir();
+  }
+});
+
 els.importForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const id = els.sessionId.value.trim();
@@ -967,6 +1058,7 @@ els.importForm.addEventListener("submit", async (event) => {
    ============================================================ */
 initConfigInputs();
 applyTheme();
+renderWatchDirs();
 renderBoard();
 startHealthChecks();
 startPolling();

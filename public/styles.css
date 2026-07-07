@@ -500,6 +500,53 @@ input::placeholder { color: var(--muted); }
 /* ============================================================
    Remote list
    ============================================================ */
+.watch-dirs {
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.watch-dirs-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+.watch-dirs-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.watch-dir-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 4px 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(7, 9, 14, 0.5);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+:root[data-theme="light"] .watch-dir-item {
+  background: rgba(255, 255, 255, 0.6);
+}
+.watch-dir-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.watch-dir-remove {
+  border: none !important;
+  padding: 0 6px !important;
+  line-height: 1.4;
+  color: var(--muted);
+  cursor: pointer;
+}
+.watch-dir-remove:hover { color: var(--danger); }
+
 .remote-list {
   display: grid;
   gap: 8px;
