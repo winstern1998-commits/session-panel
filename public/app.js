@@ -45,6 +45,35 @@ function refreshSessionDebounced(id) {
   }, 300));
 }
 
+/* Lightweight status check triggered by SSE heartbeats. OpenCode's SSE only
+   sends heartbeats (no data events), so we use the ~10s heartbeat as a poll
+   trigger. We query /session/status (cheap) and only do a full refreshSession
+   for sessions whose status actually changed or are currently busy. */
+async function checkStatuses() {
+  if (!tracked.size) return;
+  const dirs = new Set();
+  for (const snap of snapshots.values()) {
+    if (snap?.session?.directory) dirs.add(snap.session.directory);
+  }
+  if (!dirs.size) return;
+  try {
+    const statuses = await api(`/api/statuses?dirs=${encodeURIComponent([...dirs].join(","))}`);
+    for (const [id] of tracked) {
+      if (!snapshots.has(id)) continue;
+      const snap = snapshots.get(id);
+      const prev = snap.status || null;
+      const next = statuses[id] || null;
+      const statusChanged = JSON.stringify(prev) !== JSON.stringify(next);
+      const isBusy = next && (next.type === "busy" || next.type === "retry");
+      if (statusChanged || isBusy) {
+        refreshSessionDebounced(id);
+      }
+    }
+  } catch {
+    // Silently ignore — heartbeat will retry
+  }
+}
+
 /* ---------- element refs ---------- */
 const $ = (sel) => document.querySelector(sel);
 
@@ -267,8 +296,12 @@ function handleEventStreamMessage(event) {
   if (!payload) return;
   if (!payload.type && event.type && event.type !== "message") payload.type = event.type;
 
-  // Heartbeats are pure keep-alive — never trigger a refresh
-  if (payload.type === "server.heartbeat") return;
+  // Heartbeats trigger a lightweight status check — OpenCode SSE doesn't
+  // push data events, so we use the ~10s heartbeat as a poll trigger.
+  if (payload.type === "server.heartbeat") {
+    checkStatuses();
+    return;
+  }
 
   // session.status: fast path, update directly from payload
   if (handleServerEvent(event)) return;
@@ -531,16 +564,7 @@ function renderSignature() {
 
 function renderBoard() {
   const sig = renderSignature();
-  if (sig === lastRenderSig) {
-    for (const card of els.board.querySelectorAll(".session-card")) {
-      const snap = snapshots.get(card.dataset.id);
-      const el = card.querySelector(".updated");
-      if (snap && el) {
-        el.textContent = snap.checkedAt ? `刷新 ${formatTime(snap.checkedAt)}` : "未刷新";
-      }
-    }
-    return;
-  }
+  if (sig === lastRenderSig) return;
   lastRenderSig = sig;
 
   els.board.innerHTML = "";

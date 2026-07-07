@@ -36,6 +36,9 @@ class OpenCodePanelHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/events":
             self.handle_events()
             return
+        if parsed.path == "/api/statuses":
+            self.handle_statuses()
+            return
         if parsed.path.startswith("/api/session/"):
             session_id = self.extract_session_id(parsed.path)
             if session_id:
@@ -91,6 +94,22 @@ class OpenCodePanelHandler(BaseHTTPRequestHandler):
             self.send_json({"sessions": sessions, "status": status})
         except Exception as exc:
             self.send_proxy_error(exc)
+
+    def handle_statuses(self) -> None:
+        """Lightweight status check — query /session/status for given directories."""
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        dirs_param = params.get("dirs", [""])[0]
+        dirs = [d for d in dirs_param.split(",") if d]
+        if not dirs:
+            self.send_json({})
+            return
+        merged: dict[str, Any] = {}
+        for d in dirs:
+            partial = self.opencode_json("/session/status", fallback={}, directory=d)
+            if isinstance(partial, dict):
+                merged.update(partial)
+        self.send_json(merged)
 
     def handle_session_detail(self, session_id: str) -> None:
         encoded_id = quote(session_id, safe="")
