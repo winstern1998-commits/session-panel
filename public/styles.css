@@ -37,28 +37,28 @@
   --bad: #fb7185;
 
   /* status chip tints — dark */
-  --tracked-chip-bg: rgba(124, 92, 255, 0.10);
-  --tracked-chip-border: rgba(124, 92, 255, 0.26);
+  --tracked-chip-bg: rgba(124, 92, 255, 0.26);
+  --tracked-chip-border: rgba(124, 92, 255, 0.44);
   --tracked-chip-text: #c4b5fd;
   --tracked-chip-strong: #e6ecf5;
 
-  --working-chip-bg: rgba(52, 211, 153, 0.12);
-  --working-chip-border: rgba(52, 211, 153, 0.30);
+  --working-chip-bg: rgba(52, 211, 153, 0.28);
+  --working-chip-border: rgba(52, 211, 153, 0.48);
   --working-chip-text: #6ee7b7;
   --working-chip-strong: #34d399;
 
-  --retrying-chip-bg: rgba(251, 191, 36, 0.12);
-  --retrying-chip-border: rgba(251, 191, 36, 0.30);
+  --retrying-chip-bg: rgba(251, 191, 36, 0.28);
+  --retrying-chip-border: rgba(251, 191, 36, 0.48);
   --retrying-chip-text: #fcd34d;
   --retrying-chip-strong: #fbbf24;
 
-  --active-chip-bg: rgba(56, 189, 248, 0.12);
-  --active-chip-border: rgba(56, 189, 248, 0.30);
+  --active-chip-bg: rgba(56, 189, 248, 0.28);
+  --active-chip-border: rgba(56, 189, 248, 0.48);
   --active-chip-text: #7dd3fc;
   --active-chip-strong: #38bdf8;
 
-  --idle-chip-bg: rgba(100, 116, 139, 0.14);
-  --idle-chip-border: rgba(100, 116, 139, 0.30);
+  --idle-chip-bg: rgba(100, 116, 139, 0.30);
+  --idle-chip-border: rgba(100, 116, 139, 0.48);
   --idle-chip-text: #94a3b8;
   --idle-chip-strong: #cbd5e1;
 
@@ -93,28 +93,28 @@
   --idle-glow: rgba(100, 116, 139, 0.28);
 
   /* status chip tints — light (deeper text hues for contrast on white) */
-  --tracked-chip-bg: rgba(37, 99, 235, 0.08);
-  --tracked-chip-border: rgba(37, 99, 235, 0.24);
+  --tracked-chip-bg: rgba(37, 99, 235, 0.28);
+  --tracked-chip-border: rgba(37, 99, 235, 0.50);
   --tracked-chip-text: #4f46e5;
   --tracked-chip-strong: #1e293b;
 
-  --working-chip-bg: rgba(16, 185, 129, 0.10);
-  --working-chip-border: rgba(16, 185, 129, 0.32);
+  --working-chip-bg: rgba(16, 185, 129, 0.30);
+  --working-chip-border: rgba(16, 185, 129, 0.52);
   --working-chip-text: #047857;
   --working-chip-strong: #065f46;
 
-  --retrying-chip-bg: rgba(217, 119, 6, 0.10);
-  --retrying-chip-border: rgba(217, 119, 6, 0.32);
+  --retrying-chip-bg: rgba(217, 119, 6, 0.30);
+  --retrying-chip-border: rgba(217, 119, 6, 0.52);
   --retrying-chip-text: #b45309;
   --retrying-chip-strong: #92400e;
 
-  --active-chip-bg: rgba(2, 132, 199, 0.10);
-  --active-chip-border: rgba(2, 132, 199, 0.32);
+  --active-chip-bg: rgba(2, 132, 199, 0.30);
+  --active-chip-border: rgba(2, 132, 199, 0.52);
   --active-chip-text: #0369a1;
   --active-chip-strong: #075985;
 
-  --idle-chip-bg: rgba(100, 116, 139, 0.10);
-  --idle-chip-border: rgba(100, 116, 139, 0.28);
+  --idle-chip-bg: rgba(100, 116, 139, 0.30);
+  --idle-chip-border: rgba(100, 116, 139, 0.50);
   --idle-chip-text: #475569;
   --idle-chip-strong: #334155;
 }
@@ -693,6 +693,7 @@ input::placeholder { color: var(--muted); }
   overflow: hidden;
   animation: card-in 0.32s ease both;
 }
+.board-ready .session-card { animation: none; }
 
 :root[data-theme="light"] .session-card {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(248, 250, 252, 0.84));

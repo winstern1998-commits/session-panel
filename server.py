@@ -148,7 +148,7 @@ class OpenCodePanelHandler(BaseHTTPRequestHandler):
                 self.send_header("Connection", "keep-alive")
                 self.end_headers()
                 while True:
-                    chunk = response.read(4096)
+                    chunk = response.read1(4096)
                     if not chunk:
                         break
                     self.wfile.write(chunk)

@@ -15,7 +15,6 @@ const SSE_BACKOFF = [1000, 2000, 4000, 8000, 16000, 30000];
 const state = loadState();
 const tracked = new Map(state.tracked.map((item) => [item.id, item]));
 const expandedLanes = new Set(state.expandedLanes || []);
-const collapsedCards = new Set(state.collapsedCards || []);
 const snapshots = new Map();
 const liveStatuses = new Map();
 
@@ -26,6 +25,7 @@ let healthTimer = null;
 let pollTimer = null;
 let connectionState = "unknown"; // "connected" | "disconnected" | "unknown"
 let healthVersion = "";
+let lastRenderSig = "";
 const refreshFromEvent = debounce(refreshAll, 500);
 
 /* ---------- element refs ---------- */
@@ -71,7 +71,6 @@ function loadState() {
     tracked: [],
     theme: "dark",
     expandedLanes: [],
-    collapsedCards: [],
   };
   try {
     const loaded = { ...fallback, ...JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") };
@@ -80,7 +79,6 @@ function loadState() {
     if (!Array.isArray(loaded.tracked)) loaded.tracked = [];
     if (!["dark", "light"].includes(loaded.theme)) loaded.theme = fallback.theme;
     if (!Array.isArray(loaded.expandedLanes)) loaded.expandedLanes = [];
-    if (!Array.isArray(loaded.collapsedCards)) loaded.collapsedCards = [];
     return loaded;
   } catch {
     return fallback;
@@ -95,7 +93,6 @@ function saveState() {
       tracked: [...tracked.values()],
       theme: state.theme,
       expandedLanes: [...expandedLanes],
-      collapsedCards: [...collapsedCards],
     })
   );
 }
@@ -476,7 +473,39 @@ async function loadRemoteSessions() {
 /* ============================================================
    Rendering
    ============================================================ */
+function renderSignature() {
+  const parts = [];
+  for (const [id, item] of tracked) {
+    const snap = snapshots.get(id);
+    parts.push(id, "\t", item.lane || "", "\t", item.note || "", "\t",
+      item.importedAt, "\t", expandedLanes.has(item.lane || "默认主线") ? "1" : "0");
+    if (snap) {
+      parts.push("\t", snap.session?.title || "",
+        "\t", JSON.stringify(snap.status || null),
+        "\t", snap.error || "",
+        "\t", snap.lastBusyEnd || "",
+        "\t", lastMessageText(snap.messages) || "",
+        "\t", (snap.todos || []).map(t => `${t.status||t.state||""}:${t.content||t.title||""}`).join(","));
+    }
+    parts.push("\n");
+  }
+  return parts.join("");
+}
+
 function renderBoard() {
+  const sig = renderSignature();
+  if (sig === lastRenderSig) {
+    for (const card of els.board.querySelectorAll(".session-card")) {
+      const snap = snapshots.get(card.dataset.id);
+      const el = card.querySelector(".updated");
+      if (snap && el) {
+        el.textContent = snap.checkedAt ? `刷新 ${formatTime(snap.checkedAt)}` : "未刷新";
+      }
+    }
+    return;
+  }
+  lastRenderSig = sig;
+
   els.board.innerHTML = "";
 
   if (!tracked.size) {
@@ -487,6 +516,7 @@ function renderBoard() {
       </div>
     `;
     renderSummary(0, 0, 0, 0, 0);
+    els.board.classList.add("board-ready");
     return;
   }
 
@@ -541,15 +571,13 @@ function renderBoard() {
       toggleBtn.textContent = willExpand ? "折叠" : "展开";
       toggleBtn.setAttribute("aria-expanded", String(willExpand));
       for (const card of grid.querySelectorAll(".session-card")) {
-        const id = card.dataset.id;
-        const selfCollapsed = collapsedCards.has(id);
-        card.classList.toggle("collapsed", !willExpand || selfCollapsed);
+        card.classList.toggle("collapsed", !willExpand);
       }
     });
     const grid = document.createElement("div");
     grid.className = "card-grid";
     for (const entry of entries) {
-      grid.append(renderCard(entry.item, entry.snapshot, entry.status, expanded));
+      grid.append(renderCard(entry.item, entry.snapshot, entry.status, expanded, lane));
     }
     group.append(grid);
     els.board.append(group);
@@ -557,6 +585,7 @@ function renderBoard() {
 
   renderSummary(tracked.size, counts.working, counts.retrying, counts.idle);
   syncRemoteStatusesFromSnapshots();
+  els.board.classList.add("board-ready");
 }
 
 function syncRemoteStatusesFromSnapshots() {
@@ -582,11 +611,11 @@ function renderSummary(total, working, retrying, idle) {
   `;
 }
 
-function renderCard(item, snapshot, status, expanded) {
+function renderCard(item, snapshot, status, expanded, lane) {
   const session = snapshot?.session || {};
   const title = session.title || item.id;
   const card = document.createElement("article");
-  const cardCollapsed = !expanded || collapsedCards.has(item.id);
+  const cardCollapsed = !expanded;
   card.className = cardCollapsed ? "session-card collapsed" : "session-card";
   card.dataset.id = item.id;
   card.dataset.status = status.kind;
@@ -666,12 +695,19 @@ function renderCard(item, snapshot, status, expanded) {
 
   const toggleCollapse = (e) => {
     if (e.target.closest(".title-input, .card-remove")) return;
-    if (!expanded) return;
-    const willCollapse = !collapsedCards.has(item.id);
-    if (willCollapse) collapsedCards.add(item.id);
-    else collapsedCards.delete(item.id);
+    const willExpand = !expandedLanes.has(lane);
+    if (willExpand) expandedLanes.add(lane);
+    else expandedLanes.delete(lane);
     saveState();
-    card.classList.toggle("collapsed", willCollapse);
+    const laneGroup = card.closest(".lane-group");
+    const toggleBtn = laneGroup?.querySelector(".lane-toggle");
+    if (toggleBtn) {
+      toggleBtn.textContent = willExpand ? "折叠" : "展开";
+      toggleBtn.setAttribute("aria-expanded", String(willExpand));
+    }
+    for (const c of laneGroup?.querySelectorAll(".session-card") || []) {
+      c.classList.toggle("collapsed", !willExpand);
+    }
   };
   card.querySelector(".card-top").addEventListener("click", toggleCollapse);
   card.querySelector(".meta-row")?.addEventListener("click", toggleCollapse);
