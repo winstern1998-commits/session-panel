@@ -4,10 +4,59 @@
 
 本文记录 session-panel 如何检测 OpenCode session 的状态变化（idle / working / retrying），包括：
 
+- SSE 代理基础设施（认证机制、`read1()` 转发修复）
 - OpenCode SSE 事件的实际行为（与预期的差异）
 - `/session/status` 的 per-directory 作用域问题
 - 面板的三层状态检测机制
 - 轻量状态探测端点 `/api/statuses`
+
+## SSE 代理基础设施
+
+### OpenCode serve 与认证
+
+OpenCode serve 监听 `127.0.0.1:4097`，使用 Basic Auth（用户名 `opencode`，密码从 `~/.config/opencode/server-password` 读取）。
+
+面板代理所有请求到 OpenCode 时，认证信息解析优先级：
+
+```
+请求 header (x-opencode-*) → query param → 环境变量 → 默认值
+```
+
+普通 API 请求通过 `x-opencode-*` header 传递配置。SSE 请求特殊处理——`EventSource` 不支持自定义 header，改用 query param：
+
+```js
+const params = new URLSearchParams({
+  baseUrl: state.config.baseUrl,
+  username: state.config.username,
+  password: state.config.password,
+});
+eventSource = new EventSource(`/api/events?${params}`);
+```
+
+当浏览器 `localStorage` 中未存储密码时（`password=` 为空），`server.py` 回退到环境变量 `OPENCODE_SERVER_PASSWORD`（由面板的 systemd service 设置）。因此即使浏览器端密码为空，SSE 连接仍能通过认证。
+
+### SSE 代理的 `read1()` 转发
+
+`server.py` 的 `handle_events()` 将 OpenCode 的 SSE 流转发给浏览器。关键实现：
+
+```python
+while True:
+    chunk = response.read1(4096)   # 不是 read()，是 read1()
+    if not chunk:
+        break
+    self.wfile.write(chunk)
+    self.wfile.flush()
+```
+
+**为什么用 `read1()` 而不是 `read()`？**
+
+Python `urllib` 的 `HTTPResponse.read(n)` 对 chunked transfer encoding 会**连续读取多个 chunk 直到累计 n 字节**。SSE 事件每个约 100 字节，`read(4096)` 需要约 40 个事件才能填满，按 ~10s/事件计算要等 **~400 秒**才返回一次——浏览器实际上永远收不到数据。
+
+`read1(n)` 只读取**一个 chunk** 就立即返回，适合 SSE 这种小而稀疏的事件流。
+
+### 谁决定 SSE 推送什么事件
+
+**由 OpenCode serve（Go 后端）决定。** `/event` 端点、事件类型、推送时机都写死在 OpenCode 源码里。`server.py` 是透明代理——用 `read1()` 读一个 chunk 就立即转发，不检查、不过滤、不生成事件。面板无法控制 SSE 推送什么，只能接收和响应。
 
 ## OpenCode SSE 事件行为
 
@@ -224,6 +273,8 @@ journalctl --user -u opencode-session-panel.service -f
 
 | 要点 | 说明 |
 |---|---|
+| `read1()` 不是 `read()` | SSE 代理必须用 `read1(n)` 转发 chunked 流，`read(n)` 会阻塞直到填满 n 字节 |
+| 认证回退 | 浏览器端密码为空时，`server.py` 回退到环境变量，SSE 连接仍能通过认证 |
 | SSE 不推送数据 | OpenCode 的 SSE 只有心跳，不能依赖它推送状态/消息变化 |
 | 心跳做探测触发 | 利用 ~10s 心跳作为轻量状态探测的定时器，而非全量刷新的触发器 |
 | 轻量优先 | 先查 `/session/status`（1 次 API/目录），状态变了才拉完整数据（4-5 次 API/session） |
