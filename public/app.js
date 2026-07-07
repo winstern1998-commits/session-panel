@@ -28,6 +28,23 @@ let healthVersion = "";
 let lastRenderSig = "";
 const refreshFromEvent = debounce(refreshAll, 500);
 
+/* Per-session debounced refresh — only re-fetches the session that changed,
+   instead of refreshing all tracked sessions on every SSE event. */
+const refreshSessionTimers = new Map();
+function refreshSessionDebounced(id) {
+  if (refreshSessionTimers.has(id)) clearTimeout(refreshSessionTimers.get(id));
+  refreshSessionTimers.set(id, setTimeout(async () => {
+    refreshSessionTimers.delete(id);
+    if (!tracked.has(id)) return;
+    try {
+      await refreshSession(id);
+    } catch (error) {
+      snapshots.set(id, { error: error.message, checkedAt: Date.now() });
+    }
+    renderBoard();
+  }, 300));
+}
+
 /* ---------- element refs ---------- */
 const $ = (sel) => document.querySelector(sel);
 
@@ -246,8 +263,28 @@ function connectEvents() {
 }
 
 function handleEventStreamMessage(event) {
+  const payload = parseServerEvent(event.data);
+  if (!payload) return;
+  if (!payload.type && event.type && event.type !== "message") payload.type = event.type;
+
+  // Heartbeats are pure keep-alive — never trigger a refresh
+  if (payload.type === "server.heartbeat") return;
+
+  // session.status: fast path, update directly from payload
   if (handleServerEvent(event)) return;
-  refreshFromEvent();
+
+  // server.connected: full refresh to catch up after (re)connect
+  if (payload.type === "server.connected") {
+    refreshFromEvent();
+    return;
+  }
+
+  // Data events (session.updated, message.*): targeted refresh of just
+  // the affected session, not all tracked sessions.
+  const sessionID = eventSessionID(payload);
+  if (sessionID && tracked.has(sessionID)) {
+    refreshSessionDebounced(sessionID);
+  }
 }
 
 function handleServerEvent(event) {
