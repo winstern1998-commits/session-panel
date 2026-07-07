@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenCode Session Panel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="bg-grain" aria-hidden="true"></div>
+
+    <main class="shell">
+      <!-- Top bar -->
+      <header class="topbar">
+        <div class="brand" id="brand" title="点击打开连接设置">
+          <span class="conn-dot" id="connDot" data-state="unknown"></span>
+          <div class="brand-text">
+            <span class="brand-title">Session Panel</span>
+            <span class="brand-meta" id="connMeta">connecting…</span>
+          </div>
+        </div>
+
+        <div class="topbar-actions">
+          <button class="btn ghost" id="toggleImport" aria-expanded="false">
+            <span class="btn-ico">+</span> 导入
+          </button>
+          <button class="btn ghost" id="toggleRemote" aria-expanded="false">
+            <span class="btn-ico">⇅</span> 远端
+          </button>
+          <button class="btn ghost" id="enableNotifications" title="开启浏览器通知">
+            <span class="btn-ico">◔</span> 通知
+          </button>
+          <button class="btn primary" id="refreshAll">
+            <span class="btn-ico">↻</span> 刷新
+          </button>
+          <button class="btn icon" id="openSettings" title="连接设置">
+            <span class="btn-ico">⚙</span>
+          </button>
+          <button class="btn icon" id="themeToggle" title="切换明暗模式">
+            <span class="btn-ico">☾</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Summary strip -->
+      <section class="summary" id="summary" aria-live="polite"></section>
+
+      <!-- Board + floating drawers -->
+      <div class="board-wrap">
+        <!-- Collapsible: import form (floating overlay) -->
+        <section class="drawer" id="importDrawer" hidden>
+          <div class="drawer-head">
+            <h2 class="drawer-title">导入 Session</h2>
+            <div class="drawer-actions">
+              <button class="btn ghost sm" id="closeImport" title="收起">收起</button>
+            </div>
+          </div>
+          <form id="importForm" class="import-form">
+            <label class="field">
+              <span class="field-label">Session ID</span>
+              <input id="sessionId" placeholder="ses_..." required autocomplete="off" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span class="field-label">工作主线</span>
+              <input id="lane" placeholder="例如：支付重构" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span class="field-label">备注</span>
+              <input id="note" placeholder="例如：后端实现" autocomplete="off" />
+            </label>
+            <button class="btn primary" type="submit">加入面板</button>
+          </form>
+        </section>
+
+        <!-- Collapsible: remote sessions (floating overlay) -->
+        <section class="drawer" id="remoteDrawer" hidden>
+          <div class="drawer-head">
+            <h2 class="drawer-title">远端 Sessions</h2>
+            <div class="drawer-actions">
+              <button class="btn ghost sm" id="loadRemote">拉取列表</button>
+              <button class="btn ghost sm" id="closeRemote" title="收起">收起</button>
+            </div>
+          </div>
+          <div id="remoteSessions" class="remote-list">
+            <p class="empty-hint">点击「拉取列表」从 /api/sessions 读取所有远端 session。</p>
+          </div>
+        </section>
+
+        <!-- Board -->
+        <section id="board" class="board"></section>
+      </div>
+    </main>
+
+    <!-- Settings modal -->
+    <div class="modal-overlay" id="settingsOverlay" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <div class="modal-head">
+          <h2 id="settingsTitle">连接设置</h2>
+          <button class="btn icon" id="closeSettings" title="关闭"><span class="btn-ico">✕</span></button>
+        </div>
+        <div class="modal-body">
+          <label class="field">
+            <span class="field-label">Server URL</span>
+            <input id="baseUrl" autocomplete="off" spellcheck="false" />
+          </label>
+          <div class="field-row">
+            <label class="field">
+              <span class="field-label">Username</span>
+              <input id="username" autocomplete="username" spellcheck="false" />
+            </label>
+            <label class="field">
+              <span class="field-label">Password</span>
+              <input id="password" type="password" autocomplete="current-password" />
+            </label>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn ghost" id="testConnection">测试连接</button>
+          <button class="btn primary" id="saveConfig">保存并重连</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>
