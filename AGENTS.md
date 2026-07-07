@@ -30,22 +30,6 @@
 - Session detail fetches combine `/session/:id`, `/session/status`, `/session/:id/message?limit=20`, `/session/:id/todo`, and `/session/:id/children`.
 - Other proxied mutations: `PATCH /api/session/:id` → rename; `POST /api/session/:id/abort` → abort session; `POST /api/session/:id/toast` → `/tui/show-toast`.
 
-## SSE proxy and event handling
-
-- `server.py` `handle_events` uses `response.read1(4096)` (not `read`) to stream chunked SSE data. `read(n)` blocks until n bytes are filled (~400s at 10s/heartbeat); `read1(n)` returns after one chunk. See `doc/sse-fix.md` for details.
-- Frontend `handleEventStreamMessage` routes SSE events by type:
-  - `server.heartbeat` → ignored (pure keep-alive, no refresh).
-  - `server.connected` → `refreshAll()` to catch up after (re)connect.
-  - `session.status` → fast path: updates snapshot directly from payload, calls `renderBoard()` (no network fetch).
-  - `session.updated` / `message.*` → `refreshSessionDebounced(id)`: per-session 300ms debounce, fetches only the affected session (not all tracked sessions).
-- `EventSource` cannot set custom headers, so SSE connection passes config via query params (`baseUrl`, `username`, `password`). When the browser-side password is empty, `server.py` falls back to env vars for auth.
-
-## Rendering strategy
-
-- `renderBoard()` computes a `renderSignature()` from all render-relevant fields (tracked IDs, lanes, notes, titles, status, todos, last message, errors, expanded lanes). If the signature is unchanged since the last render, it skips the full DOM rebuild and only updates the "刷新时间" text on existing cards in place.
-- `.session-card` has a `card-in` entrance animation (opacity 0→1, 0.32s). After the first `renderBoard()`, a `board-ready` class is added to the board element; CSS `.board-ready .session-card { animation: none; }` disables the entrance animation on all subsequent renders to prevent flicker.
-- Lane expand/collapse toggles cards in place via CSS classes (`collapsed`) without calling `renderBoard()`, so the CSS grid-transition runs smoothly.
-
 ## OpenCode status scoping gotcha
 
 - OpenCode 1.17.x scopes `/session/status` **per directory** (InstanceState ScopedCache). A request without `x-opencode-directory` only returns status for the serve process cwd, typically empty.
@@ -56,3 +40,7 @@
 
 - `server.py` binds the panel to `127.0.0.1`; change deliberately if LAN access is required.
 - In WSL/Windows networking issues, use `hostname -I` to find the WSL IP and run OpenCode with `--hostname 0.0.0.0 --port 4097 --cors http://127.0.0.1:7878` before pointing the panel at `http://<WSL-IP>:4097`.
+
+## Workflow
+
+- 每有一个独立改动就提交并推送，保持工作区整洁。
