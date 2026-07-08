@@ -551,7 +551,10 @@ function renderWatchDirs() {
     )
     .join("");
   for (const btn of els.watchDirList.querySelectorAll(".watch-dir-remove")) {
-    btn.addEventListener("click", () => removeWatchDirectory(btn.dataset.dir));
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      removeWatchDirectory(btn.dataset.dir);
+    });
   }
 }
 
