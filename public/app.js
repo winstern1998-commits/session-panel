@@ -14,7 +14,7 @@ const SSE_BACKOFF = [1000, 2000, 4000, 8000, 16000, 30000];
 /* ---------- state ---------- */
 const state = loadState();
 const tracked = new Map(state.tracked.map((item) => [item.id, item]));
-const expandedLanes = new Set(state.expandedLanes || []);
+const collapsedLanes = new Set(state.collapsedLanes || []);
 const snapshots = new Map();
 const liveStatuses = new Map();
 
@@ -123,7 +123,7 @@ function loadState() {
     config: { baseUrl: DEFAULT_BASE_URL, username: "opencode", password: "" },
     tracked: [],
     theme: "dark",
-    expandedLanes: [],
+    collapsedLanes: [],
     selectedSession: null,
     watchDirectories: [],
     tabListWidth: null,
@@ -135,7 +135,7 @@ function loadState() {
     if (loaded.config.baseUrl === OLD_DEFAULT_BASE_URL) loaded.config.baseUrl = DEFAULT_BASE_URL;
     if (!Array.isArray(loaded.tracked)) loaded.tracked = [];
     if (!["dark", "light"].includes(loaded.theme)) loaded.theme = fallback.theme;
-    if (!Array.isArray(loaded.expandedLanes)) loaded.expandedLanes = [];
+    if (!Array.isArray(loaded.collapsedLanes)) loaded.collapsedLanes = [];
     if (typeof loaded.selectedSession !== "string") loaded.selectedSession = null;
     if (!Array.isArray(loaded.watchDirectories)) loaded.watchDirectories = [];
   if (typeof loaded.tabListWidth !== "number") loaded.tabListWidth = null;
@@ -153,7 +153,7 @@ function saveState() {
       config: state.config,
       tracked: [...tracked.values()],
       theme: state.theme,
-      expandedLanes: [...expandedLanes],
+      collapsedLanes: [...collapsedLanes],
       selectedSession: state.selectedSession,
       watchDirectories: state.watchDirectories,
       tabListWidth: state.tabListWidth,
@@ -809,8 +809,18 @@ function renderTabList(items) {
   for (const [lane, entries] of groups) {
     const header = document.createElement("div");
     header.className = "lane-header";
-    header.textContent = lane;
+    const collapsed = collapsedLanes.has(lane);
+    if (collapsed) header.classList.add("collapsed");
+    header.textContent = `${lane} (${entries.length})`;
+    header.addEventListener("click", () => {
+      if (collapsedLanes.has(lane)) collapsedLanes.delete(lane);
+      else collapsedLanes.add(lane);
+      saveState();
+      renderBoard();
+    });
     els.tabList.append(header);
+
+    if (collapsed) continue;
 
     for (const { item, status, unread } of entries) {
       const snapshot = snapshots.get(item.id);

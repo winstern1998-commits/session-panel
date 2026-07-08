@@ -858,6 +858,21 @@ input::placeholder { color: var(--muted); }
   color: var(--muted);
   font-weight: 600;
   user-select: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.lane-header::before {
+  content: "▾";
+  font-size: 0.7rem;
+  transition: transform 0.15s ease;
+}
+.lane-header.collapsed::before {
+  transform: rotate(-90deg);
+}
+.lane-header:hover {
+  color: var(--text);
 }
 .lane-header:first-child {
   padding-top: 2px;
