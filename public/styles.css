@@ -747,53 +747,67 @@ input::placeholder { color: var(--muted); }
   align-items: start;
 }
 
-/* Sidebar collapse toggle */
+/* Pin each child to its grid cell so hiding one (display:none) doesn't
+   reshuffle the others into empty 0px columns. */
+.workspace > .tab-list { grid-column: 1; }
+.workspace > .tab-list-resizer { grid-column: 2; }
+.workspace > .detail-panel { grid-column: 3; }
+
+/* Sidebar collapse toggle — a circular bead grip riding the divider line.
+   Lives inside the resizer; click collapses, the rest of the resizer drags. */
 .sidebar-toggle {
   position: absolute;
-  top: 6px;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 20;
-  width: 16px;
-  height: 36px;
+  width: 26px;
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--line);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  background: var(--bg-2);
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--panel-solid);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   color: var(--muted);
   cursor: pointer;
-  font-size: 0.7rem;
-  transition: color 0.15s ease, background 0.15s ease, left 0.18s ease;
-  padding: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+  transition: color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+:root[data-theme="light"] .sidebar-toggle {
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
 }
 .sidebar-toggle::before {
   content: "‹";
   font-family: var(--mono);
   font-weight: 700;
-  font-size: 0.9rem;
+  font-size: 0.92rem;
   line-height: 1;
 }
-.workspace:not(.sidebar-collapsed) .sidebar-toggle {
-  left: calc(var(--tab-list-width, 300px) - 9px);
-}
-.workspace.sidebar-collapsed .sidebar-toggle::before {
-  content: "›";
-}
-.workspace.sidebar-collapsed .sidebar-toggle {
-  left: 0;
-}
+.workspace.sidebar-collapsed .sidebar-toggle::before { content: "›"; }
 .sidebar-toggle:hover {
   color: var(--text);
-  background: var(--bg-3);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft), 0 4px 14px var(--accent-glow);
+  transform: translateX(-50%) scale(1.1);
 }
 
-/* Collapsed state: hide tab list and resizer, detail panel takes full width */
+/* Collapsed state: tab-list hidden, resizer stays as a slim expand rail on
+   the left edge. Detail panel fills the rest. */
 .workspace.sidebar-collapsed {
-  grid-template-columns: 0 0 minmax(0, 1fr);
+  grid-template-columns: 0 16px minmax(0, 1fr);
 }
-.workspace.sidebar-collapsed .tab-list,
-.workspace.sidebar-collapsed .tab-list-resizer {
+.workspace.sidebar-collapsed .tab-list {
   display: none;
+}
+.workspace.sidebar-collapsed .tab-list-resizer {
+  cursor: default;
+}
+.workspace.sidebar-collapsed .tab-list-resizer::after {
+  background: transparent;
 }
 
 .tab-list {
@@ -1370,6 +1384,9 @@ input::placeholder { color: var(--muted); }
     grid-template-columns: 1fr;
     gap: 12px;
   }
+  .workspace > .tab-list,
+  .workspace > .tab-list-resizer,
+  .workspace > .detail-panel { grid-column: auto; }
   .tab-list-resizer { display: none; }
   .sidebar-toggle { display: none; }
   .lane-header { display: none; }

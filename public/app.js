@@ -1376,6 +1376,8 @@ function initTabListResizer() {
   let startWidth = 0;
 
   resizer.addEventListener("mousedown", (e) => {
+    if (state.sidebarCollapsed) return;
+    if (e.target.closest(".sidebar-toggle")) return;
     dragging = true;
     startX = e.clientX;
     const cssVal = getComputedStyle(document.documentElement)
