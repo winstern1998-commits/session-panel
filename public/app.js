@@ -756,9 +756,7 @@ function renderBoard() {
     return;
   }
 
-  // Sort: unread first, then busy (working > retrying > idle), then by
-  // lastBusyEnd (most recent first), then by importedAt.
-  const statusRank = { working: 0, retrying: 1, idle: 2 };
+  // Sort: unread first, then by last message time (most recent first).
   const items = [...tracked.values()].map((item) => {
     const snapshot = snapshots.get(item.id);
     const status = classifyStatus(snapshot?.status);
@@ -769,16 +767,10 @@ function renderBoard() {
     const au = a.unread > 0 ? 0 : 1;
     const bu = b.unread > 0 ? 0 : 1;
     if (au !== bu) return au - bu;
-    // 2. Within same unread group, sort by status (working > retrying > idle)
-    const ra = statusRank[a.status.kind] ?? 3;
-    const rb = statusRank[b.status.kind] ?? 3;
-    if (ra !== rb) return ra - rb;
-    // 3. Then by lastBusyEnd (most recent first)
-    const ba = a.snapshot?.lastBusyEnd || 0;
-    const bb = b.snapshot?.lastBusyEnd || 0;
-    if (ba !== bb) return bb - ba;
-    // 4. Then by importedAt
-    return a.item.importedAt - b.item.importedAt;
+    // 2. Then by last message time (most recent first)
+    const ta = lastMessageTime(a.snapshot);
+    const tb = lastMessageTime(b.snapshot);
+    return tb - ta;
   });
 
   const counts = { working: 0, retrying: 0, idle: 0 };
@@ -993,6 +985,12 @@ function lastMessageText(messages = []) {
     }
   }
   return "";
+}
+
+function lastMessageTime(snapshot) {
+  const msgs = snapshot?.messages;
+  if (!msgs?.length) return 0;
+  return msgs[msgs.length - 1]?.info?.time?.created || 0;
 }
 
 /* ============================================================
