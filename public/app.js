@@ -104,6 +104,7 @@ const els = {
   closeRemote: $("#closeRemote"),
   summary: $("#summary"),
   tabList: $("#tabList"),
+  tabListResizer: $("#tabListResizer"),
   detailPanel: $("#detailPanel"),
   settingsOverlay: $("#settingsOverlay"),
   closeSettings: $("#closeSettings"),
@@ -125,6 +126,7 @@ function loadState() {
     expandedLanes: [],
     selectedSession: null,
     watchDirectories: [],
+    tabListWidth: null,
     readState: {},
   };
   try {
@@ -136,6 +138,7 @@ function loadState() {
     if (!Array.isArray(loaded.expandedLanes)) loaded.expandedLanes = [];
     if (typeof loaded.selectedSession !== "string") loaded.selectedSession = null;
     if (!Array.isArray(loaded.watchDirectories)) loaded.watchDirectories = [];
+  if (typeof loaded.tabListWidth !== "number") loaded.tabListWidth = null;
     if (!loaded.readState || typeof loaded.readState !== "object") loaded.readState = {};
     return loaded;
   } catch {
@@ -153,6 +156,7 @@ function saveState() {
       expandedLanes: [...expandedLanes],
       selectedSession: state.selectedSession,
       watchDirectories: state.watchDirectories,
+      tabListWidth: state.tabListWidth,
       readState: state.readState || {},
     })
   );
@@ -812,44 +816,57 @@ function renderBoard() {
 }
 
 function renderTabList(items) {
-  for (const { item, status, unread } of items) {
-    const snapshot = snapshots.get(item.id);
-    const session = snapshot?.session || {};
-    const title = session.title || item.id;
-    const lane = item.lane || "默认主线";
-    const tab = document.createElement("button");
-    tab.type = "button";
-    tab.className = "tab-item";
-    tab.dataset.id = item.id;
-    tab.setAttribute("aria-selected", String(item.id === state.selectedSession));
-    const badgeText = unread > 99 ? "99+" : String(unread);
-    const badgeHtml = unread > 0
-      ? `<span class="tab-badge">${escapeHtml(badgeText)}</span>`
-      : "";
-    tab.innerHTML = `
-      <span class="tab-dot ${status.kind}"></span>
-      <span class="tab-title">${escapeHtml(title)}</span>
-      <span class="tab-lane">${escapeHtml(lane)}</span>
-      ${badgeHtml}
-      <span class="tab-remove" title="移除" role="button" aria-label="移除">×</span>
-    `;
-    tab.querySelector(".tab-remove").addEventListener("click", (event) => {
-      event.stopPropagation();
-      tracked.delete(item.id);
-      snapshots.delete(item.id);
-      if (state.readState) delete state.readState[item.id];
-      if (state.selectedSession === item.id) state.selectedSession = null;
-      saveState();
-      renderBoard();
-    });
-    tab.addEventListener("click", () => {
-      if (state.selectedSession === item.id) return;
-      state.selectedSession = item.id;
-      markSessionRead(item.id);
-      saveState();
-      renderBoard();
-    });
-    els.tabList.append(tab);
+  // Group by lane, preserving sort order within each group.
+  const groups = new Map();
+  for (const entry of items) {
+    const lane = entry.item.lane || "默认主线";
+    if (!groups.has(lane)) groups.set(lane, []);
+    groups.get(lane).push(entry);
+  }
+
+  for (const [lane, entries] of groups) {
+    const header = document.createElement("div");
+    header.className = "lane-header";
+    header.textContent = lane;
+    els.tabList.append(header);
+
+    for (const { item, status, unread } of entries) {
+      const snapshot = snapshots.get(item.id);
+      const session = snapshot?.session || {};
+      const title = session.title || item.id;
+      const tab = document.createElement("button");
+      tab.type = "button";
+      tab.className = "tab-item";
+      tab.dataset.id = item.id;
+      tab.setAttribute("aria-selected", String(item.id === state.selectedSession));
+      const badgeText = unread > 99 ? "99+" : String(unread);
+      const badgeHtml = unread > 0
+        ? `<span class="tab-badge">${escapeHtml(badgeText)}</span>`
+        : "";
+      tab.innerHTML = `
+        <span class="tab-dot ${status.kind}"></span>
+        <span class="tab-title">${escapeHtml(title)}</span>
+        ${badgeHtml}
+        <span class="tab-remove" title="移除" role="button" aria-label="移除">×</span>
+      `;
+      tab.querySelector(".tab-remove").addEventListener("click", (event) => {
+        event.stopPropagation();
+        tracked.delete(item.id);
+        snapshots.delete(item.id);
+        if (state.readState) delete state.readState[item.id];
+        if (state.selectedSession === item.id) state.selectedSession = null;
+        saveState();
+        renderBoard();
+      });
+      tab.addEventListener("click", () => {
+        if (state.selectedSession === item.id) return;
+        state.selectedSession = item.id;
+        markSessionRead(item.id);
+        saveState();
+        renderBoard();
+      });
+      els.tabList.append(tab);
+    }
   }
 }
 
@@ -893,7 +910,7 @@ function renderDetail(item, snapshot, status) {
       </div>
     </div>
     <div class="meta-row">
-      <span class="tag lane">${escapeHtml(lane)}</span>
+      <input class="lane-input" value="${escapeHtml(lane)}" title="编辑主线标签，Enter 保存" />
       <span class="updated">${escapeHtml(updated)}</span>
     </div>
     <p class="note">${escapeHtml(item.note || "")}</p>
@@ -924,6 +941,21 @@ function renderDetail(item, snapshot, status) {
     } catch (err) {
       alert(`改名失败：${err.message}`);
     }
+  });
+
+  const laneInput = card.querySelector(".lane-input");
+  const saveLane = () => {
+    const val = laneInput.value.trim() || "默认主线";
+    const tracked_item = tracked.get(item.id);
+    if (tracked_item && tracked_item.lane !== val) {
+      tracked_item.lane = val;
+      saveState();
+      renderBoard();
+    }
+  };
+  laneInput?.addEventListener("blur", saveLane);
+  laneInput?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); laneInput.blur(); }
   });
 
   card.querySelector(".act-notify")?.addEventListener("click", () => {
@@ -1319,12 +1351,61 @@ els.importForm.addEventListener("submit", async (event) => {
 });
 
 /* ============================================================
+   Tab list resizer
+   ============================================================ */
+function initTabListResizer() {
+  const resizer = els.tabListResizer;
+  if (!resizer) return;
+
+  let dragging = false;
+  let startX = 0;
+  let startWidth = 0;
+
+  resizer.addEventListener("mousedown", (e) => {
+    dragging = true;
+    startX = e.clientX;
+    const cssVal = getComputedStyle(document.documentElement)
+      .getPropertyValue("--tab-list-width")
+      .trim();
+    startWidth = parseInt(cssVal) || 300;
+    resizer.classList.add("dragging");
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    e.preventDefault();
+  });
+
+  document.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - startX;
+    const newWidth = Math.max(180, Math.min(500, startWidth + dx));
+    document.documentElement.style.setProperty("--tab-list-width", newWidth + "px");
+  });
+
+  document.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false;
+    resizer.classList.remove("dragging");
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    const cssVal = getComputedStyle(document.documentElement)
+      .getPropertyValue("--tab-list-width")
+      .trim();
+    state.tabListWidth = parseInt(cssVal) || 300;
+    saveState();
+  });
+}
+
+/* ============================================================
    Boot
    ============================================================ */
+if (state.tabListWidth) {
+  document.documentElement.style.setProperty("--tab-list-width", state.tabListWidth + "px");
+}
 initConfigInputs();
 applyTheme();
 renderWatchDirs();
 initWatchDirAutocomplete();
+initTabListResizer();
 renderBoard();
 startHealthChecks();
 startPolling();
