@@ -26,6 +26,8 @@ let pollTimer = null;
 let connectionState = "unknown"; // "connected" | "disconnected" | "unknown"
 let healthVersion = "";
 let lastRenderSig = "";
+let remoteFilterDir = null;
+let watchDirDropdown = null;
 const refreshFromEvent = debounce(refreshAll, 500);
 
 /* Per-session debounced refresh — only re-fetches the session that changed,
@@ -123,6 +125,7 @@ function loadState() {
     expandedLanes: [],
     selectedSession: null,
     watchDirectories: [],
+    readState: {},
   };
   try {
     const loaded = { ...fallback, ...JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") };
@@ -133,6 +136,7 @@ function loadState() {
     if (!Array.isArray(loaded.expandedLanes)) loaded.expandedLanes = [];
     if (typeof loaded.selectedSession !== "string") loaded.selectedSession = null;
     if (!Array.isArray(loaded.watchDirectories)) loaded.watchDirectories = [];
+    if (!loaded.readState || typeof loaded.readState !== "object") loaded.readState = {};
     return loaded;
   } catch {
     return fallback;
@@ -149,6 +153,7 @@ function saveState() {
       expandedLanes: [...expandedLanes],
       selectedSession: state.selectedSession,
       watchDirectories: state.watchDirectories,
+      readState: state.readState || {},
     })
   );
 }
@@ -160,6 +165,28 @@ function applyTheme() {
       ? `<span class="btn-ico">☀</span>`
       : `<span class="btn-ico">☾</span>`;
   els.themeToggle.title = state.theme === "light" ? "切换到黑夜模式" : "切换到白天模式";
+}
+
+/* ---------- unread tracking ---------- */
+function computeUnread(id) {
+  if (state.selectedSession === id) return 0;
+  const snap = snapshots.get(id);
+  if (!snap?.messages?.length) return 0;
+  const rs = state.readState[id];
+  if (!rs?.lastReadMessageId) return 0;
+  const messages = snap.messages;
+  const idx = messages.findIndex((m) => m?.info?.id === rs.lastReadMessageId);
+  if (idx === -1) return messages.length;
+  return messages.length - 1 - idx;
+}
+
+function markSessionRead(id) {
+  const snap = snapshots.get(id);
+  const latestId = snap?.messages?.length
+    ? snap.messages[snap.messages.length - 1]?.info?.id
+    : null;
+  if (!state.readState) state.readState = {};
+  state.readState[id] = { lastReadMessageId: latestId };
 }
 
 function toggleTheme() {
@@ -414,6 +441,15 @@ async function refreshSession(id) {
   if (previous?.lastBusyEnd) snapshot.lastBusyEnd = previous.lastBusyEnd;
   observeStatusTransition(id, previous?.status, snapshot.status, snapshot);
   snapshots.set(id, snapshot);
+  // First fetch of a newly-tracked session counts as read (user just added it).
+  if (!state.readState[id]) {
+    markSessionRead(id);
+    saveState();
+  }
+  // Viewing the session marks it as read.
+  if (state.selectedSession === id) {
+    markSessionRead(id);
+  }
   // Auto-track the session's directory so future "拉取列表" covers its project.
   const dir = snapshot.session?.directory;
   if (dir) addWatchDirectory(dir);
@@ -560,63 +596,118 @@ async function loadRemoteSessions() {
       return;
     }
 
-    els.remoteSessions.innerHTML = "";
-    let touchedTracked = false;
-    for (const session of visibleSessions) {
-      const id = session.id || session.sessionID || session.sessionId;
-      const rawStatus = effectiveRawStatus(id, statusMap[id]);
-      if (tracked.has(id)) {
-        mergeRemoteSnapshot(session, rawStatus);
-        touchedTracked = true;
-      }
-      const statusInfo = classifyStatus(rawStatus);
-      const existing = tracked.get(id);
-      const item = document.createElement("div");
-      item.className = "remote-item";
-      item.dataset.id = id;
-      item.innerHTML = `
-        <div>
-          <div class="remote-title">${escapeHtml(session.title || "Untitled")}</div>
-          <p class="remote-sub">
-            <span>${escapeHtml(id)}</span>
-            <span class="tag remote-status ${statusInfo.kind}">${escapeHtml(statusInfo.label)}</span>
-            ${session.agent ? `<span class="tag">${escapeHtml(session.agent)}</span>` : ""}
-            ${session.directory ? `<span class="tag">${escapeHtml(session.directory)}</span>` : ""}
-          </p>
-        </div>
-        <div class="remote-fields">
-          <label class="mini-field">
-            <span>工作主线</span>
-            <input class="remote-lane" value="${escapeHtml(existing?.lane || els.lane.value.trim() || "默认主线")}" autocomplete="off" />
-          </label>
-          <label class="mini-field">
-            <span>备注</span>
-            <input class="remote-note" value="${escapeHtml(existing?.note || "")}" autocomplete="off" />
-          </label>
-        </div>
-        <button class="btn primary sm remote-add">${existing ? "更新" : "加入"}</button>
-      `;
-      item.querySelector(".remote-add").addEventListener("click", async () => {
-        const laneInput = item.querySelector(".remote-lane");
-        const noteInput = item.querySelector(".remote-note");
-        tracked.set(id, {
-          id,
-          lane: laneInput.value.trim() || "默认主线",
-          note: noteInput.value.trim(),
-          importedAt: existing?.importedAt || Date.now(),
-        });
-        saveState();
-        renderBoard();
-        await refreshSession(id).catch(() => {});
-        renderBoard();
-        item.querySelector(".remote-add").textContent = "更新";
-      });
-      els.remoteSessions.append(item);
-    }
-    if (touchedTracked) renderBoard();
+    renderRemoteList(visibleSessions, statusMap);
   } catch (error) {
     els.remoteSessions.innerHTML = `<p class="empty-hint">读取失败：${escapeHtml(error.message)}</p>`;
   }
+}
+
+function shortenDirPath(dir) {
+  const parts = dir.replace(/\/+$/, "").split("/");
+  const last = parts[parts.length - 1];
+  const prev = parts[parts.length - 2];
+  return prev ? `${prev}/${last}` : last || dir;
+}
+
+function renderRemoteList(visibleSessions, statusMap) {
+  els.remoteSessions.innerHTML = "";
+  const uniqueDirs = [...new Set(visibleSessions.map((s) => s.directory).filter(Boolean))];
+
+  // Filter bar
+  if (uniqueDirs.length) {
+    const bar = document.createElement("div");
+    bar.className = "remote-filter-bar";
+    const allChip = document.createElement("button");
+    allChip.type = "button";
+    allChip.className = "remote-filter-chip" + (remoteFilterDir === null ? " active" : "");
+    allChip.textContent = "全部";
+    allChip.addEventListener("click", (e) => {
+      e.stopPropagation();
+      remoteFilterDir = null;
+      renderRemoteList(visibleSessions, statusMap);
+    });
+    bar.append(allChip);
+    for (const dir of uniqueDirs) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "remote-filter-chip" + (remoteFilterDir === dir ? " active" : "");
+      chip.textContent = shortenDirPath(dir);
+      chip.title = dir;
+      chip.addEventListener("click", (e) => {
+        e.stopPropagation();
+        remoteFilterDir = dir;
+        renderRemoteList(visibleSessions, statusMap);
+      });
+      bar.append(chip);
+    }
+    els.remoteSessions.append(bar);
+  }
+
+  const filtered = remoteFilterDir
+    ? visibleSessions.filter((s) => s.directory === remoteFilterDir)
+    : visibleSessions;
+
+  if (!filtered.length) {
+    const hint = document.createElement("p");
+    hint.className = "empty-hint";
+    hint.textContent = "该目录下没有 session。";
+    els.remoteSessions.append(hint);
+    return;
+  }
+
+  let touchedTracked = false;
+  for (const session of filtered) {
+    const id = session.id || session.sessionID || session.sessionId;
+    const rawStatus = effectiveRawStatus(id, statusMap[id]);
+    if (tracked.has(id)) {
+      mergeRemoteSnapshot(session, rawStatus);
+      touchedTracked = true;
+    }
+    const statusInfo = classifyStatus(rawStatus);
+    const existing = tracked.get(id);
+    const item = document.createElement("div");
+    item.className = "remote-item";
+    item.dataset.id = id;
+    item.innerHTML = `
+      <div>
+        <div class="remote-title">${escapeHtml(session.title || "Untitled")}</div>
+        <p class="remote-sub">
+          <span>${escapeHtml(id)}</span>
+          <span class="tag remote-status ${statusInfo.kind}">${escapeHtml(statusInfo.label)}</span>
+          ${session.agent ? `<span class="tag">${escapeHtml(session.agent)}</span>` : ""}
+          ${session.directory ? `<span class="tag">${escapeHtml(session.directory)}</span>` : ""}
+        </p>
+      </div>
+      <div class="remote-fields">
+        <label class="mini-field">
+          <span>工作主线</span>
+          <input class="remote-lane" value="${escapeHtml(existing?.lane || els.lane.value.trim() || "默认主线")}" autocomplete="off" />
+        </label>
+        <label class="mini-field">
+          <span>备注</span>
+          <input class="remote-note" value="${escapeHtml(existing?.note || "")}" autocomplete="off" />
+        </label>
+      </div>
+      <button class="btn primary sm remote-add">${existing ? "更新" : "加入"}</button>
+    `;
+    item.querySelector(".remote-add").addEventListener("click", async () => {
+      const laneInput = item.querySelector(".remote-lane");
+      const noteInput = item.querySelector(".remote-note");
+      tracked.set(id, {
+        id,
+        lane: laneInput.value.trim() || "默认主线",
+        note: noteInput.value.trim(),
+        importedAt: existing?.importedAt || Date.now(),
+      });
+      saveState();
+      renderBoard();
+      await refreshSession(id).catch(() => {});
+      renderBoard();
+      item.querySelector(".remote-add").textContent = "更新";
+    });
+    els.remoteSessions.append(item);
+  }
+  if (touchedTracked) renderBoard();
 }
 
 /* ============================================================
@@ -634,7 +725,8 @@ function renderSignature() {
         "\t", snap.error || "",
         "\t", snap.lastBusyEnd || "",
         "\t", lastMessageText(snap.messages) || "",
-        "\t", (snap.todos || []).map(t => `${t.status||t.state||""}:${t.content||t.title||""}`).join(","));
+        "\t", (snap.todos || []).map(t => `${t.status||t.state||""}:${t.content||t.title||""}`).join(","),
+        "\t", String(computeUnread(id)));
     }
     parts.push("\n");
   }
@@ -662,17 +754,28 @@ function renderBoard() {
     return;
   }
 
-  // Sort: busy first (working > retrying > idle), then by importedAt within
-  // the same status.
+  // Sort: unread first, then busy (working > retrying > idle), then by
+  // lastBusyEnd (most recent first), then by importedAt.
   const statusRank = { working: 0, retrying: 1, idle: 2 };
   const items = [...tracked.values()].map((item) => {
     const snapshot = snapshots.get(item.id);
     const status = classifyStatus(snapshot?.status);
-    return { item, snapshot, status };
+    const unread = computeUnread(item.id);
+    return { item, snapshot, status, unread };
   }).sort((a, b) => {
+    // 1. Unread sessions first
+    const au = a.unread > 0 ? 0 : 1;
+    const bu = b.unread > 0 ? 0 : 1;
+    if (au !== bu) return au - bu;
+    // 2. Within same unread group, sort by status (working > retrying > idle)
     const ra = statusRank[a.status.kind] ?? 3;
     const rb = statusRank[b.status.kind] ?? 3;
     if (ra !== rb) return ra - rb;
+    // 3. Then by lastBusyEnd (most recent first)
+    const ba = a.snapshot?.lastBusyEnd || 0;
+    const bb = b.snapshot?.lastBusyEnd || 0;
+    if (ba !== bb) return bb - ba;
+    // 4. Then by importedAt
     return a.item.importedAt - b.item.importedAt;
   });
 
@@ -683,6 +786,7 @@ function renderBoard() {
   // first item (top of the sorted list — usually the busiest session).
   if (!state.selectedSession || !tracked.has(state.selectedSession)) {
     state.selectedSession = items[0].item.id;
+    markSessionRead(items[0].item.id);
     saveState();
   }
 
@@ -705,7 +809,7 @@ function renderBoard() {
 }
 
 function renderTabList(items) {
-  for (const { item, status } of items) {
+  for (const { item, status, unread } of items) {
     const snapshot = snapshots.get(item.id);
     const session = snapshot?.session || {};
     const title = session.title || item.id;
@@ -715,14 +819,30 @@ function renderTabList(items) {
     tab.className = "tab-item";
     tab.dataset.id = item.id;
     tab.setAttribute("aria-selected", String(item.id === state.selectedSession));
+    const badgeText = unread > 99 ? "99+" : String(unread);
+    const badgeHtml = unread > 0
+      ? `<span class="tab-badge">${escapeHtml(badgeText)}</span>`
+      : "";
     tab.innerHTML = `
       <span class="tab-dot ${status.kind}"></span>
       <span class="tab-title">${escapeHtml(title)}</span>
       <span class="tab-lane">${escapeHtml(lane)}</span>
+      ${badgeHtml}
+      <span class="tab-remove" title="移除" role="button" aria-label="移除">×</span>
     `;
+    tab.querySelector(".tab-remove").addEventListener("click", (event) => {
+      event.stopPropagation();
+      tracked.delete(item.id);
+      snapshots.delete(item.id);
+      if (state.readState) delete state.readState[item.id];
+      if (state.selectedSession === item.id) state.selectedSession = null;
+      saveState();
+      renderBoard();
+    });
     tab.addEventListener("click", () => {
       if (state.selectedSession === item.id) return;
       state.selectedSession = item.id;
+      markSessionRead(item.id);
       saveState();
       renderBoard();
     });
@@ -785,17 +905,8 @@ function renderDetail(item, snapshot, status) {
     <div class="card-actions">
       <button class="btn ghost sm act-save">改名</button>
       <button class="btn ghost sm act-notify">提醒 OK</button>
-      <button class="btn danger sm act-remove">移除</button>
     </div>
   `;
-
-  card.querySelector(".act-remove").addEventListener("click", () => {
-    tracked.delete(item.id);
-    snapshots.delete(item.id);
-    if (state.selectedSession === item.id) state.selectedSession = null;
-    saveState();
-    renderBoard();
-  });
 
   card.querySelector(".act-save")?.addEventListener("click", async () => {
     const titleInput = card.querySelector(".title-input");
@@ -1024,16 +1135,167 @@ function handleAddWatchDir() {
   if (!dir) return;
   if (addWatchDirectory(dir)) {
     els.watchDirInput.value = "";
+    hideWatchDirDropdown();
     loadRemoteSessions();
   }
 }
 els.addWatchDir.addEventListener("click", handleAddWatchDir);
-els.watchDirInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    handleAddWatchDir();
+
+/* ---------- Watch dir autocomplete ---------- */
+function initWatchDirAutocomplete() {
+  const input = els.watchDirInput;
+  const row = input.closest(".watch-dirs-row");
+  if (!row) return;
+  row.style.position = "relative";
+
+  watchDirDropdown = document.createElement("div");
+  watchDirDropdown.className = "autocomplete-dropdown";
+  watchDirDropdown.hidden = true;
+  row.append(watchDirDropdown);
+
+  let debounceTimer = null;
+  let currentItems = []; // [{ path, label }]
+
+  function parseInput(value) {
+    // The server expands ~ via os.path.expanduser, so we pass ~ paths through.
+    // Split into parentDir (up to and including last /) and prefix (after).
+    const v = value === "~" ? "~/" : value;
+    const lastSlash = v.lastIndexOf("/");
+    if (lastSlash === -1) {
+      // No slash yet: list home (empty path) and filter by the typed prefix.
+      return { parentDir: "", prefix: v };
+    }
+    return {
+      parentDir: v.slice(0, lastSlash + 1),
+      prefix: v.slice(lastSlash + 1),
+    };
   }
-});
+
+  async function refreshSuggestions() {
+    const value = input.value;
+    const { parentDir, prefix } = parseInput(value);
+    try {
+      const res = await api(`/api/listdir?path=${encodeURIComponent(parentDir)}`);
+      const dirs = Array.isArray(res?.dirs) ? res.dirs : [];
+      currentItems = dirs
+        .map((full) => {
+          if (typeof full !== "string") return null;
+          const seg = full.split("/").filter(Boolean).pop() || full;
+          return { path: full, label: seg };
+        })
+        .filter((entry) => entry && entry.label.startsWith(prefix));
+      renderSuggestions();
+    } catch {
+      hideWatchDirDropdown();
+    }
+  }
+
+  function renderSuggestions() {
+    if (!currentItems.length) {
+      hideWatchDirDropdown();
+      return;
+    }
+    watchDirDropdown.innerHTML = "";
+    for (let i = 0; i < currentItems.length; i++) {
+      const entry = currentItems[i];
+      const node = document.createElement("div");
+      node.className = "autocomplete-item" + (i === 0 ? " active" : "");
+      node.textContent = entry.label;
+      node.title = entry.path;
+      node.dataset.path = entry.path;
+      node.addEventListener("mousedown", (e) => {
+        e.preventDefault(); // keep input focus
+        selectItem(entry);
+      });
+      watchDirDropdown.append(node);
+    }
+    watchDirDropdown.hidden = false;
+  }
+
+  function selectItem(entry) {
+    input.value = entry.path + "/";
+    input.focus();
+    scheduleRefresh();
+  }
+
+  function getActiveIndex() {
+    const nodes = watchDirDropdown.querySelectorAll(".autocomplete-item");
+    for (let i = 0; i < nodes.length; i++) {
+      if (nodes[i].classList.contains("active")) return i;
+    }
+    return -1;
+  }
+
+  function setActiveIndex(idx) {
+    const nodes = watchDirDropdown.querySelectorAll(".autocomplete-item");
+    if (!nodes.length) return;
+    nodes.forEach((n) => n.classList.remove("active"));
+    if (idx < 0) idx = nodes.length - 1;
+    if (idx >= nodes.length) idx = 0;
+    nodes[idx].classList.add("active");
+    nodes[idx].scrollIntoView({ block: "nearest" });
+  }
+
+  function scheduleRefresh() {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(refreshSuggestions, 150);
+  }
+
+  function hideWatchDirDropdown() {
+    if (watchDirDropdown) watchDirDropdown.hidden = true;
+  }
+
+  input.addEventListener("input", scheduleRefresh);
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Tab") {
+      if (!watchDirDropdown.hidden) {
+        e.preventDefault();
+        const idx = getActiveIndex();
+        if (idx >= 0 && currentItems[idx]) {
+          selectItem(currentItems[idx]);
+        }
+      }
+      return;
+    }
+    if (e.key === "ArrowDown") {
+      if (!watchDirDropdown.hidden) {
+        e.preventDefault();
+        setActiveIndex(getActiveIndex() + 1);
+      }
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      if (!watchDirDropdown.hidden) {
+        e.preventDefault();
+        setActiveIndex(getActiveIndex() - 1);
+      }
+      return;
+    }
+    if (e.key === "Enter") {
+      if (!watchDirDropdown.hidden) {
+        const idx = getActiveIndex();
+        if (idx >= 0 && currentItems[idx]) {
+          e.preventDefault();
+          selectItem(currentItems[idx]);
+          return;
+        }
+      }
+      e.preventDefault();
+      hideWatchDirDropdown();
+      handleAddWatchDir();
+      return;
+    }
+    if (e.key === "Escape") {
+      hideWatchDirDropdown();
+      return;
+    }
+  });
+
+  input.addEventListener("blur", () => {
+    setTimeout(hideWatchDirDropdown, 150);
+  });
+}
 
 els.importForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1059,6 +1321,7 @@ els.importForm.addEventListener("submit", async (event) => {
 initConfigInputs();
 applyTheme();
 renderWatchDirs();
+initWatchDirAutocomplete();
 renderBoard();
 startHealthChecks();
 startPolling();

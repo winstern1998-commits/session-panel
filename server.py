@@ -39,6 +39,9 @@ class OpenCodePanelHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/statuses":
             self.handle_statuses()
             return
+        if parsed.path == "/api/listdir":
+            self.handle_listdir()
+            return
         if parsed.path.startswith("/api/session/"):
             session_id = self.extract_session_id(parsed.path)
             if session_id:
@@ -112,6 +115,21 @@ class OpenCodePanelHandler(BaseHTTPRequestHandler):
             if isinstance(partial, dict):
                 merged.update(partial)
         self.send_json(merged)
+
+    def handle_listdir(self) -> None:
+        """List subdirectories of a given path for autocomplete."""
+        params = parse_qs(urlparse(self.path).query)
+        raw_path = params.get("path", [""])[0]
+        path = os.path.expanduser(raw_path) if raw_path else os.path.expanduser("~")
+        try:
+            entries = []
+            for entry in os.scandir(path):
+                if entry.is_dir() and not entry.name.startswith("."):
+                    entries.append(entry.path)
+            entries.sort()
+            self.send_json({"dirs": entries})
+        except (OSError, PermissionError):
+            self.send_json({"dirs": [], "error": f"Cannot read directory: {path}"})
 
     def handle_session_detail(self, session_id: str) -> None:
         encoded_id = quote(session_id, safe="")
