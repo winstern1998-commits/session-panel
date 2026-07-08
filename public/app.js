@@ -1010,9 +1010,9 @@ function formatRelativeTime(ts) {
   if (!ts) return "";
   const d = new Date(ts);
   const now = new Date();
-  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  if (d.toDateString() === now.toDateString()) return hm;
-  return `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+  const hms = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+  if (d.toDateString() === now.toDateString()) return hms;
+  return `${d.getMonth() + 1}/${d.getDate()} ${hms}`;
 }
 
 /* ============================================================
