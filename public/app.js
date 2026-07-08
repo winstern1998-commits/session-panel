@@ -1008,14 +1008,11 @@ function lastMessageTime(snapshot) {
 
 function formatRelativeTime(ts) {
   if (!ts) return "";
-  const diff = Date.now() - ts;
-  const min = 60000, hour = 3600000, day = 86400000;
-  if (diff < min) return "刚刚";
-  if (diff < hour) return Math.floor(diff / min) + "m";
-  if (diff < day) return Math.floor(diff / hour) + "h";
-  if (diff < 7 * day) return Math.floor(diff / day) + "d";
   const d = new Date(ts);
-  return `${d.getMonth() + 1}/${d.getDate()}`;
+  const now = new Date();
+  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  if (d.toDateString() === now.toDateString()) return hm;
+  return `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
 }
 
 /* ============================================================
