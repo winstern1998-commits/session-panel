@@ -173,7 +173,6 @@ function applyTheme() {
 
 /* ---------- unread tracking ---------- */
 function computeUnread(id) {
-  if (state.selectedSession === id) return 0;
   const snap = snapshots.get(id);
   if (!snap?.messages?.length) return 0;
   const rs = state.readState[id];
@@ -449,10 +448,6 @@ async function refreshSession(id) {
   if (!state.readState[id]) {
     markSessionRead(id);
     saveState();
-  }
-  // Viewing the session marks it as read.
-  if (state.selectedSession === id) {
-    markSessionRead(id);
   }
   // Auto-track the session's directory so future "拉取列表" covers its project.
   const dir = snapshot.session?.directory;
@@ -859,7 +854,6 @@ function renderTabList(items) {
         renderBoard();
       });
       tab.addEventListener("click", () => {
-        if (state.selectedSession === item.id) return;
         state.selectedSession = item.id;
         markSessionRead(item.id);
         saveState();
