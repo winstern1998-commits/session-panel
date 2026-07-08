@@ -717,6 +717,7 @@ function renderRemoteList(visibleSessions, statusMap) {
    ============================================================ */
 function renderSignature() {
   const parts = [state.selectedSession || "", "\n"];
+  parts.push([...collapsedLanes].sort().join(","), "\n");
   for (const [id, item] of tracked) {
     const snap = snapshots.get(id);
     parts.push(id, "\t", item.lane || "", "\t", item.note || "", "\t",
