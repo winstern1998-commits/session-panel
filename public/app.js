@@ -756,18 +756,13 @@ function renderBoard() {
     return;
   }
 
-  // Sort: unread first, then by last message time (most recent first).
+  // Sort: by last message time (most recent first).
   const items = [...tracked.values()].map((item) => {
     const snapshot = snapshots.get(item.id);
     const status = classifyStatus(snapshot?.status);
     const unread = computeUnread(item.id);
     return { item, snapshot, status, unread };
   }).sort((a, b) => {
-    // 1. Unread sessions first
-    const au = a.unread > 0 ? 0 : 1;
-    const bu = b.unread > 0 ? 0 : 1;
-    if (au !== bu) return au - bu;
-    // 2. Then by last message time (most recent first)
     const ta = lastMessageTime(a.snapshot);
     const tb = lastMessageTime(b.snapshot);
     return tb - ta;
