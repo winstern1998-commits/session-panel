@@ -740,10 +740,60 @@ input::placeholder { color: var(--muted); }
    Workspace — left tab list + right detail panel
    ============================================================ */
 .workspace {
+  position: relative;
   display: grid;
   grid-template-columns: var(--tab-list-width, 300px) 16px minmax(0, 1fr);
   gap: 0;
   align-items: start;
+}
+
+/* Sidebar collapse toggle */
+.sidebar-toggle {
+  position: absolute;
+  top: 6px;
+  z-index: 20;
+  width: 16px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--bg-2);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.7rem;
+  transition: color 0.15s ease, background 0.15s ease, left 0.18s ease;
+  padding: 0;
+}
+.sidebar-toggle::before {
+  content: "‹";
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+.workspace:not(.sidebar-collapsed) .sidebar-toggle {
+  left: calc(var(--tab-list-width, 300px) - 9px);
+}
+.workspace.sidebar-collapsed .sidebar-toggle::before {
+  content: "›";
+}
+.workspace.sidebar-collapsed .sidebar-toggle {
+  left: 0;
+}
+.sidebar-toggle:hover {
+  color: var(--text);
+  background: var(--bg-3);
+}
+
+/* Collapsed state: hide tab list and resizer, detail panel takes full width */
+.workspace.sidebar-collapsed {
+  grid-template-columns: 0 0 minmax(0, 1fr);
+}
+.workspace.sidebar-collapsed .tab-list,
+.workspace.sidebar-collapsed .tab-list-resizer {
+  display: none;
 }
 
 .tab-list {
@@ -797,8 +847,9 @@ input::placeholder { color: var(--muted); }
   position: relative;
   display: grid;
   grid-template-columns: 12px 1fr auto auto;
-  grid-template-rows: auto;
+  grid-template-rows: auto auto;
   column-gap: 10px;
+  row-gap: 1px;
   align-items: center;
   padding: 9px 11px 9px 9px;
   border: 1px solid transparent;
@@ -818,7 +869,8 @@ input::placeholder { color: var(--muted); }
 :root[data-theme="light"] .tab-item:hover { background: rgba(241, 245, 249, 0.8); }
 
 .tab-item .tab-dot {
-  grid-row: 1;
+  grid-row: 1 / 3;
+  align-self: center;
   width: 11px;
   height: 11px;
   border-radius: 50%;
@@ -839,6 +891,7 @@ input::placeholder { color: var(--muted); }
 .tab-item .tab-dot.idle { background: var(--idle); box-shadow: 0 0 6px var(--idle-glow); }
 
 .tab-item .tab-title {
+  grid-row: 1;
   font-size: 0.88rem;
   font-weight: 600;
   color: var(--text);
@@ -847,6 +900,15 @@ input::placeholder { color: var(--muted); }
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+.tab-item .tab-time {
+  grid-column: 2;
+  grid-row: 2;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--muted);
+  white-space: nowrap;
 }
 
 .lane-header {
@@ -1309,6 +1371,7 @@ input::placeholder { color: var(--muted); }
     gap: 12px;
   }
   .tab-list-resizer { display: none; }
+  .sidebar-toggle { display: none; }
   .lane-header { display: none; }
   .tab-list {
     position: static;

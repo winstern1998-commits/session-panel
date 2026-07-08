@@ -105,6 +105,8 @@ const els = {
   summary: $("#summary"),
   tabList: $("#tabList"),
   tabListResizer: $("#tabListResizer"),
+  workspace: $("#workspace"),
+  sidebarToggle: $("#sidebarToggle"),
   detailPanel: $("#detailPanel"),
   settingsOverlay: $("#settingsOverlay"),
   closeSettings: $("#closeSettings"),
@@ -127,6 +129,7 @@ function loadState() {
     selectedSession: null,
     watchDirectories: [],
     tabListWidth: null,
+    sidebarCollapsed: false,
     readState: {},
   };
   try {
@@ -139,6 +142,7 @@ function loadState() {
     if (typeof loaded.selectedSession !== "string") loaded.selectedSession = null;
     if (!Array.isArray(loaded.watchDirectories)) loaded.watchDirectories = [];
   if (typeof loaded.tabListWidth !== "number") loaded.tabListWidth = null;
+    if (typeof loaded.sidebarCollapsed !== "boolean") loaded.sidebarCollapsed = false;
     if (!loaded.readState || typeof loaded.readState !== "object") loaded.readState = {};
     return loaded;
   } catch {
@@ -157,6 +161,7 @@ function saveState() {
       selectedSession: state.selectedSession,
       watchDirectories: state.watchDirectories,
       tabListWidth: state.tabListWidth,
+      sidebarCollapsed: state.sidebarCollapsed,
       readState: state.readState || {},
     })
   );
@@ -836,11 +841,13 @@ function renderTabList(items) {
       const badgeHtml = unread > 0
         ? `<span class="tab-badge">${escapeHtml(badgeText)}</span>`
         : "";
+      const timeStr = formatRelativeTime(lastMessageTime(snapshot));
       tab.innerHTML = `
         <span class="tab-dot ${status.kind}"></span>
         <span class="tab-title">${escapeHtml(title)}</span>
         ${badgeHtml}
         <span class="tab-remove" title="移除" role="button" aria-label="移除">×</span>
+        <span class="tab-time">${escapeHtml(timeStr)}</span>
       `;
       tab.querySelector(".tab-remove").addEventListener("click", (event) => {
         event.stopPropagation();
@@ -997,6 +1004,18 @@ function lastMessageTime(snapshot) {
   const msgs = snapshot?.messages;
   if (!msgs?.length) return 0;
   return msgs[msgs.length - 1]?.info?.time?.created || 0;
+}
+
+function formatRelativeTime(ts) {
+  if (!ts) return "";
+  const diff = Date.now() - ts;
+  const min = 60000, hour = 3600000, day = 86400000;
+  if (diff < min) return "刚刚";
+  if (diff < hour) return Math.floor(diff / min) + "m";
+  if (diff < day) return Math.floor(diff / hour) + "h";
+  if (diff < 7 * day) return Math.floor(diff / day) + "d";
+  const d = new Date(ts);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
 /* ============================================================
@@ -1396,6 +1415,16 @@ function initTabListResizer() {
 /* ============================================================
    Boot
    ============================================================ */
+function applySidebarState() {
+  els.workspace.classList.toggle("sidebar-collapsed", state.sidebarCollapsed);
+  els.sidebarToggle.title = state.sidebarCollapsed ? "展开侧栏" : "收起侧栏";
+}
+els.sidebarToggle.addEventListener("click", () => {
+  state.sidebarCollapsed = !state.sidebarCollapsed;
+  applySidebarState();
+  saveState();
+});
+
 if (state.tabListWidth) {
   document.documentElement.style.setProperty("--tab-list-width", state.tabListWidth + "px");
 }
@@ -1404,6 +1433,7 @@ applyTheme();
 renderWatchDirs();
 initWatchDirAutocomplete();
 initTabListResizer();
+applySidebarState();
 renderBoard();
 startHealthChecks();
 startPolling();
