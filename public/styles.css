@@ -889,7 +889,6 @@ input::placeholder { color: var(--muted); }
   align-items: center;
   padding: 9px 11px 9px 9px;
   border: none;
-  border-top: 1px solid var(--line);
   border-radius: 0;
   background: transparent;
   color: var(--text-dim);
@@ -897,9 +896,6 @@ input::placeholder { color: var(--muted); }
   cursor: pointer;
   transition: background 0.16s ease, color 0.16s ease, transform 0.12s ease;
   font-family: var(--sans);
-}
-.tab-item:first-child {
-  border-top: none;
 }
 .tab-item:hover {
   background: rgba(148, 163, 184, 0.08);
