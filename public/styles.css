@@ -951,10 +951,10 @@ input::placeholder { color: var(--muted); }
   position: relative;
   padding: 14px 11px 6px;
   font-family: var(--mono);
-  font-size: 0.64rem;
+  font-size: 0.7rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: var(--text-dim);
   font-weight: 600;
   user-select: none;
   cursor: pointer;
