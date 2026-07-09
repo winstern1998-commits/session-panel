@@ -888,7 +888,7 @@ input::placeholder { color: var(--muted); }
   row-gap: 1px;
   align-items: center;
   padding: 9px 11px 9px 9px;
-  border: 1px solid transparent;
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-dim);
@@ -898,8 +898,8 @@ input::placeholder { color: var(--muted); }
   font-family: var(--sans);
 }
 .tab-item:hover {
-  background: rgba(148, 163, 184, 0.07);
-  border-color: var(--line);
+  background: rgba(148, 163, 184, 0.1);
+  border-color: var(--line-strong);
   color: var(--text);
 }
 :root[data-theme="light"] .tab-item:hover { background: rgba(241, 245, 249, 0.8); }
