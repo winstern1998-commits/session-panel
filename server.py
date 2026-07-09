@@ -211,6 +211,8 @@ class OpenCodePanelHandler(BaseHTTPRequestHandler):
             content_type = "text/css; charset=utf-8"
         elif path.suffix == ".svg":
             content_type = "image/svg+xml"
+        elif path.suffix == ".png":
+            content_type = "image/png"
 
         data = path.read_bytes()
         self.send_response(200)
