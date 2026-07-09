@@ -703,7 +703,7 @@ function renderRemoteList(visibleSessions, statusMap) {
       <div class="remote-fields">
         <label class="mini-field">
           <span>工作主线</span>
-          <input class="remote-lane" value="${escapeHtml(existing?.lane || els.lane.value.trim() || "默认主线")}" autocomplete="off" />
+          <input class="remote-lane" value="${escapeHtml(existing?.lane || els.lane.value.trim() || "默认主线")}" autocomplete="off" list="laneOptions" />
         </label>
         <label class="mini-field">
           <span>备注</span>
@@ -815,7 +815,18 @@ function renderBoard() {
 
   renderSummary(tracked.size, counts.working, counts.retrying, counts.idle);
   syncRemoteStatusesFromSnapshots();
+  updateLaneOptions();
   els.detailPanel.classList.add("board-ready");
+}
+
+function updateLaneOptions() {
+  const dl = document.getElementById("laneOptions");
+  if (!dl) return;
+  const lanes = [...new Set([...tracked.values()].map((item) => item.lane || "默认主线"))].sort();
+  const sig = lanes.join("\n");
+  if (dl.dataset.sig === sig) return;
+  dl.dataset.sig = sig;
+  dl.innerHTML = lanes.map((lane) => `<option value="${escapeHtml(lane)}">`).join("");
 }
 
 function renderTabList(items) {
@@ -924,7 +935,7 @@ function renderDetail(item, snapshot, status) {
       </div>
     </div>
     <div class="meta-row">
-      <input class="lane-input" value="${escapeHtml(lane)}" title="编辑主线标签，Enter 保存" />
+      <input class="lane-input" value="${escapeHtml(lane)}" title="编辑主线标签，Enter 保存" list="laneOptions" />
       <span class="updated">${escapeHtml(updated)}</span>
     </div>
     <p class="note">${escapeHtml(item.note || "")}</p>
