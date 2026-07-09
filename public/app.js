@@ -27,6 +27,9 @@ let connectionState = "unknown"; // "connected" | "disconnected" | "unknown"
 let healthVersion = "";
 let lastRenderSig = "";
 let remoteFilterDir = null;
+let remoteSearchQuery = "";
+let lastRemoteSessions = null;
+let lastRemoteStatusMap = null;
 let watchDirDropdown = null;
 const refreshFromEvent = debounce(refreshAll, 500);
 
@@ -97,6 +100,7 @@ const els = {
   remoteDrawer: $("#remoteDrawer"),
   loadRemote: $("#loadRemote"),
   remoteSessions: $("#remoteSessions"),
+  remoteSearch: $("#remoteSearch"),
   watchDirInput: $("#watchDirInput"),
   addWatchDir: $("#addWatchDir"),
   watchDirList: $("#watchDirList"),
@@ -603,6 +607,8 @@ async function loadRemoteSessions() {
       return;
     }
 
+    lastRemoteSessions = visibleSessions;
+    lastRemoteStatusMap = statusMap;
     renderRemoteList(visibleSessions, statusMap);
   } catch (error) {
     els.remoteSessions.innerHTML = `<p class="empty-hint">读取失败：${escapeHtml(error.message)}</p>`;
@@ -650,14 +656,23 @@ function renderRemoteList(visibleSessions, statusMap) {
     els.remoteSessions.append(bar);
   }
 
-  const filtered = remoteFilterDir
+  let filtered = remoteFilterDir
     ? visibleSessions.filter((s) => s.directory === remoteFilterDir)
     : visibleSessions;
+
+  const q = remoteSearchQuery.toLowerCase().trim();
+  if (q) {
+    filtered = filtered.filter((s) => {
+      const title = (s.title || "").toLowerCase();
+      const id = (s.id || s.sessionID || s.sessionId || "").toLowerCase();
+      return title.includes(q) || id.includes(q);
+    });
+  }
 
   if (!filtered.length) {
     const hint = document.createElement("p");
     hint.className = "empty-hint";
-    hint.textContent = "该目录下没有 session。";
+    hint.textContent = q ? "没有匹配的 session。" : "该目录下没有 session。";
     els.remoteSessions.append(hint);
     return;
   }
@@ -1176,6 +1191,10 @@ document.addEventListener("click", (e) => {
 });
 
 els.loadRemote.addEventListener("click", loadRemoteSessions);
+els.remoteSearch.addEventListener("input", debounce(() => {
+  remoteSearchQuery = els.remoteSearch.value;
+  if (lastRemoteSessions) renderRemoteList(lastRemoteSessions, lastRemoteStatusMap);
+}, 150));
 els.refreshAll.addEventListener("click", () => refreshAll());
 els.enableNotifications.addEventListener("click", enableNotifications);
 

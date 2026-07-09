@@ -588,6 +588,27 @@ input::placeholder { color: var(--muted); }
   color: var(--text);
 }
 
+.remote-search {
+  padding: 0 2px 8px;
+}
+.remote-search input {
+  width: 100%;
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 0.85rem;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.remote-search input:focus {
+  border-color: var(--accent);
+}
+.remote-search input::placeholder {
+  color: var(--muted);
+}
+
 .remote-list {
   display: grid;
   gap: 8px;
