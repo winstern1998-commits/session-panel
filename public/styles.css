@@ -888,18 +888,21 @@ input::placeholder { color: var(--muted); }
   row-gap: 1px;
   align-items: center;
   padding: 9px 11px 9px 9px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border: none;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
   background: transparent;
   color: var(--text-dim);
   text-align: left;
   cursor: pointer;
-  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.12s ease;
+  transition: background 0.16s ease, color 0.16s ease, transform 0.12s ease;
   font-family: var(--sans);
 }
+.tab-item:first-child {
+  border-top: none;
+}
 .tab-item:hover {
-  background: rgba(148, 163, 184, 0.1);
-  border-color: var(--line-strong);
+  background: rgba(148, 163, 184, 0.08);
   color: var(--text);
 }
 :root[data-theme="light"] .tab-item:hover { background: rgba(241, 245, 249, 0.8); }
@@ -947,9 +950,23 @@ input::placeholder { color: var(--muted); }
   white-space: nowrap;
 }
 
+.lane-group {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  transition: border-color 0.16s ease;
+}
+.lane-group:hover {
+  border-color: var(--line-strong);
+}
+.lane-group + .lane-group {
+  margin-top: 2px;
+}
+
 .lane-header {
-  position: relative;
-  padding: 10px 11px;
+  padding: 8px 11px;
   font-family: var(--mono);
   font-size: 0.7rem;
   letter-spacing: 0.08em;
@@ -961,17 +978,11 @@ input::placeholder { color: var(--muted); }
   display: flex;
   align-items: center;
   gap: 4px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: rgba(148, 163, 184, 0.04);
-  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
-}
-.lane-header:first-child {
-  margin-top: 0;
+  background: rgba(148, 163, 184, 0.06);
+  transition: background 0.16s ease, color 0.16s ease;
 }
 .lane-header:hover {
-  background: rgba(148, 163, 184, 0.08);
-  border-color: var(--line-strong);
+  background: rgba(148, 163, 184, 0.1);
   color: var(--text);
 }
 .lane-header::before {
@@ -1050,7 +1061,7 @@ input::placeholder { color: var(--muted); }
 .tab-item[aria-selected="true"]::before {
   content: "";
   position: absolute;
-  left: -1px;
+  left: 0;
   top: 8px;
   bottom: 8px;
   width: 3px;

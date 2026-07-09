@@ -913,6 +913,10 @@ function renderTabList(items) {
   }
 
   for (const [lane, entries] of groups) {
+    const group = document.createElement("div");
+    group.className = "lane-group";
+    if (collapsedLanes.has(lane)) group.classList.add("collapsed");
+
     const header = document.createElement("div");
     header.className = "lane-header";
     const collapsed = collapsedLanes.has(lane);
@@ -924,48 +928,49 @@ function renderTabList(items) {
       saveState();
       renderBoard();
     });
-    els.tabList.append(header);
+    group.append(header);
 
-    if (collapsed) continue;
-
-    for (const { item, status, unread } of entries) {
-      const snapshot = snapshots.get(item.id);
-      const session = snapshot?.session || {};
-      const title = session.title || item.id;
-      const tab = document.createElement("button");
-      tab.type = "button";
-      tab.className = "tab-item";
-      tab.dataset.id = item.id;
-      tab.setAttribute("aria-selected", String(item.id === state.selectedSession));
-      const badgeText = unread > 99 ? "99+" : String(unread);
-      const badgeHtml = unread > 0
-        ? `<span class="tab-badge">${escapeHtml(badgeText)}</span>`
-        : "";
-      const timeStr = formatRelativeTime(lastMessageTime(snapshot));
-      tab.innerHTML = `
-        <span class="tab-dot ${status.kind}"></span>
-        <span class="tab-title">${escapeHtml(title)}</span>
-        ${badgeHtml}
-        <span class="tab-remove" title="移除" role="button" aria-label="移除">×</span>
-        <span class="tab-time">${escapeHtml(timeStr)}</span>
-      `;
-      tab.querySelector(".tab-remove").addEventListener("click", (event) => {
-        event.stopPropagation();
-        tracked.delete(item.id);
-        snapshots.delete(item.id);
-        if (state.readState) delete state.readState[item.id];
-        if (state.selectedSession === item.id) state.selectedSession = null;
-        saveState();
-        renderBoard();
-      });
-      tab.addEventListener("click", () => {
-        state.selectedSession = item.id;
-        markSessionRead(item.id);
-        saveState();
-        renderBoard();
-      });
-      els.tabList.append(tab);
+    if (!collapsed) {
+      for (const { item, status, unread } of entries) {
+        const snapshot = snapshots.get(item.id);
+        const session = snapshot?.session || {};
+        const title = session.title || item.id;
+        const tab = document.createElement("button");
+        tab.type = "button";
+        tab.className = "tab-item";
+        tab.dataset.id = item.id;
+        tab.setAttribute("aria-selected", String(item.id === state.selectedSession));
+        const badgeText = unread > 99 ? "99+" : String(unread);
+        const badgeHtml = unread > 0
+          ? `<span class="tab-badge">${escapeHtml(badgeText)}</span>`
+          : "";
+        const timeStr = formatRelativeTime(lastMessageTime(snapshot));
+        tab.innerHTML = `
+          <span class="tab-dot ${status.kind}"></span>
+          <span class="tab-title">${escapeHtml(title)}</span>
+          ${badgeHtml}
+          <span class="tab-remove" title="移除" role="button" aria-label="移除">×</span>
+          <span class="tab-time">${escapeHtml(timeStr)}</span>
+        `;
+        tab.querySelector(".tab-remove").addEventListener("click", (event) => {
+          event.stopPropagation();
+          tracked.delete(item.id);
+          snapshots.delete(item.id);
+          if (state.readState) delete state.readState[item.id];
+          if (state.selectedSession === item.id) state.selectedSession = null;
+          saveState();
+          renderBoard();
+        });
+        tab.addEventListener("click", () => {
+          state.selectedSession = item.id;
+          markSessionRead(item.id);
+          saveState();
+          renderBoard();
+        });
+        group.append(tab);
+      }
     }
+    els.tabList.append(group);
   }
 }
 
