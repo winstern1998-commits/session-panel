@@ -836,7 +836,7 @@ input::placeholder { color: var(--muted); }
   top: 16px;
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 4px;
   max-height: calc(100vh - 140px);
   overflow-y: auto;
   overflow-x: hidden;
@@ -889,8 +889,7 @@ input::placeholder { color: var(--muted); }
   align-items: center;
   padding: 9px 11px 9px 9px;
   border: 1px solid transparent;
-  border-bottom: 1px solid var(--line);
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-dim);
   text-align: left;
@@ -949,7 +948,8 @@ input::placeholder { color: var(--muted); }
 }
 
 .lane-header {
-  padding: 10px 11px 6px;
+  position: relative;
+  padding: 14px 11px 6px;
   font-family: var(--mono);
   font-size: 0.64rem;
   letter-spacing: 0.08em;
@@ -961,10 +961,27 @@ input::placeholder { color: var(--muted); }
   display: flex;
   align-items: center;
   gap: 4px;
-  border-top: 1px solid var(--line-strong);
+}
+/* Lane group separator — a hairline that fades at both ends, more deliberate
+   than a flat full-width rule. Skipped before the first group. */
+.lane-header:not(:first-child)::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--line-strong) 16%,
+    var(--line-strong) 84%,
+    transparent
+  );
+  opacity: 0.85;
 }
 .lane-header:first-child {
-  border-top: none;
+  padding-top: 2px;
 }
 .lane-header::before {
   content: "▾";
@@ -976,9 +993,6 @@ input::placeholder { color: var(--muted); }
 }
 .lane-header:hover {
   color: var(--text);
-}
-.lane-header:first-child {
-  padding-top: 2px;
 }
 
 .tab-item .tab-badge {
