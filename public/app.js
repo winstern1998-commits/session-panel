@@ -703,7 +703,7 @@ function renderRemoteList(visibleSessions, statusMap) {
       <div class="remote-fields">
         <label class="mini-field">
           <span>工作主线</span>
-          <input class="remote-lane" value="${escapeHtml(existing?.lane || els.lane.value.trim() || "默认主线")}" autocomplete="off" list="laneOptions" />
+          <input class="remote-lane" value="${escapeHtml(existing?.lane || els.lane.value.trim() || "默认主线")}" autocomplete="off" />
         </label>
         <label class="mini-field">
           <span>备注</span>
@@ -728,6 +728,7 @@ function renderRemoteList(visibleSessions, statusMap) {
       item.querySelector(".remote-add").textContent = "更新";
     });
     els.remoteSessions.append(item);
+    attachLaneDropdown(item.querySelector(".remote-lane"));
   }
   if (touchedTracked) renderBoard();
 }
@@ -819,14 +820,87 @@ function renderBoard() {
   els.detailPanel.classList.add("board-ready");
 }
 
+let existingLanes = [];
 function updateLaneOptions() {
-  const dl = document.getElementById("laneOptions");
-  if (!dl) return;
-  const lanes = [...new Set([...tracked.values()].map((item) => item.lane || "默认主线"))].sort();
-  const sig = lanes.join("\n");
-  if (dl.dataset.sig === sig) return;
-  dl.dataset.sig = sig;
-  dl.innerHTML = lanes.map((lane) => `<option value="${escapeHtml(lane)}">`).join("");
+  existingLanes = [...new Set([...tracked.values()].map((item) => item.lane || "默认主线"))].sort();
+}
+
+/* Custom lane dropdown — shows ALL existing lanes on focus (not just prefix
+   matches like <datalist>), filters by substring as you type. */
+function attachLaneDropdown(input) {
+  if (!input || input.dataset.laneDropdown) return;
+  input.dataset.laneDropdown = "1";
+
+  let dropdown = null;
+  let activeIdx = -1;
+  let currentLanes = [];
+
+  function getFiltered() {
+    const q = input.value.toLowerCase().trim();
+    if (!q) return [...existingLanes];
+    return existingLanes.filter((lane) => lane.toLowerCase().includes(q));
+  }
+
+  function show(filter) {
+    currentLanes = filter === false ? [...existingLanes] : getFiltered();
+    if (!currentLanes.length) { hide(); return; }
+    if (!dropdown) {
+      dropdown = document.createElement("div");
+      dropdown.className = "autocomplete-dropdown lane-dropdown";
+      input.parentElement.appendChild(dropdown);
+    }
+    dropdown.innerHTML = "";
+    currentLanes.forEach((lane, i) => {
+      const item = document.createElement("div");
+      item.className = "autocomplete-item" + (i === activeIdx ? " active" : "");
+      item.textContent = lane;
+      item.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        select(i);
+      });
+      dropdown.append(item);
+    });
+    dropdown.hidden = false;
+  }
+
+  function hide() {
+    if (dropdown) dropdown.hidden = true;
+    activeIdx = -1;
+  }
+
+  function select(idx) {
+    if (idx >= 0 && idx < currentLanes.length) {
+      input.value = currentLanes[idx];
+    }
+    hide();
+    input.focus();
+  }
+
+  function setActive(idx) {
+    const items = dropdown?.querySelectorAll(".autocomplete-item");
+    if (!items?.length) return;
+    activeIdx = Math.max(0, Math.min(idx, items.length - 1));
+    items.forEach((n) => n.classList.remove("active"));
+    items[activeIdx]?.classList.add("active");
+    items[activeIdx]?.scrollIntoView({ block: "nearest" });
+  }
+
+  input.addEventListener("focus", () => { activeIdx = -1; show(false); });
+  input.addEventListener("input", () => { activeIdx = -1; show(true); });
+  input.addEventListener("blur", () => setTimeout(hide, 150));
+  input.addEventListener("keydown", (e) => {
+    if (!dropdown || dropdown.hidden) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); setActive(activeIdx + 1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActive(activeIdx - 1); }
+    else if (e.key === "Enter" && activeIdx >= 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      select(activeIdx);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      hide();
+    }
+  });
 }
 
 function renderTabList(items) {
@@ -935,7 +1009,7 @@ function renderDetail(item, snapshot, status) {
       </div>
     </div>
     <div class="meta-row">
-      <input class="lane-input" value="${escapeHtml(lane)}" title="编辑主线标签，Enter 保存" list="laneOptions" />
+      <input class="lane-input" value="${escapeHtml(lane)}" title="编辑主线标签，Enter 保存" />
       <span class="updated">${escapeHtml(updated)}</span>
     </div>
     <p class="note">${escapeHtml(item.note || "")}</p>
@@ -969,6 +1043,7 @@ function renderDetail(item, snapshot, status) {
   });
 
   const laneInput = card.querySelector(".lane-input");
+  attachLaneDropdown(laneInput);
   const saveLane = () => {
     const val = laneInput.value.trim() || "默认主线";
     const tracked_item = tracked.get(item.id);
@@ -1202,6 +1277,7 @@ document.addEventListener("click", (e) => {
 });
 
 els.loadRemote.addEventListener("click", loadRemoteSessions);
+attachLaneDropdown(els.lane);
 els.remoteSearch.addEventListener("input", debounce(() => {
   remoteSearchQuery = els.remoteSearch.value;
   if (lastRemoteSessions) renderRemoteList(lastRemoteSessions, lastRemoteStatusMap);
