@@ -273,6 +273,8 @@ async function checkHealth() {
     if (!eventSource || eventSource.readyState === EventSource.CLOSED) {
       connectEvents();
     }
+    // Pick up sessions tracked from the TUI.
+    syncTracked();
   } catch {
     setConnectionState("disconnected");
     healthVersion = "";
@@ -430,6 +432,32 @@ function startPolling() {
 /* ============================================================
    Refresh logic
    ============================================================ */
+async function syncTracked() {
+  try {
+    const data = await api("/api/tracked");
+    const serverIds = new Set(data.tracked || []);
+    let changed = false;
+    for (const id of serverIds) {
+      if (!tracked.has(id)) {
+        tracked.set(id, { id, lane: "默认主线", note: "", importedAt: Date.now() });
+        changed = true;
+        refreshSession(id).then(() => renderBoard()).catch(() => {});
+      }
+    }
+    for (const [id] of tracked) {
+      if (!serverIds.has(id)) {
+        api("/api/track", { method: "POST", body: JSON.stringify({ sessionId: id }) }).catch(() => {});
+      }
+    }
+    if (changed) {
+      saveState();
+      renderBoard();
+    }
+  } catch {
+    // Silently ignore — will retry on next health check
+  }
+}
+
 async function refreshAll() {
   if (!tracked.size) {
     renderBoard();
@@ -721,6 +749,7 @@ function renderRemoteList(visibleSessions, statusMap) {
         note: noteInput.value.trim(),
         importedAt: existing?.importedAt || Date.now(),
       });
+      api("/api/track", { method: "POST", body: JSON.stringify({ sessionId: id }) }).catch(() => {});
       saveState();
       renderBoard();
       await refreshSession(id).catch(() => {});
@@ -955,6 +984,7 @@ function renderTabList(items) {
         tab.querySelector(".tab-remove").addEventListener("click", (event) => {
           event.stopPropagation();
           tracked.delete(item.id);
+          api(`/api/track/${encodeURIComponent(item.id)}`, { method: "DELETE" }).catch(() => {});
           snapshots.delete(item.id);
           if (state.readState) delete state.readState[item.id];
           if (state.selectedSession === item.id) state.selectedSession = null;
@@ -1467,6 +1497,7 @@ els.importForm.addEventListener("submit", async (event) => {
     note: els.note.value.trim(),
     importedAt: Date.now(),
   });
+  api("/api/track", { method: "POST", body: JSON.stringify({ sessionId: id }) }).catch(() => {});
   els.sessionId.value = "";
   els.note.value = "";
   saveState();
@@ -1548,4 +1579,5 @@ renderBoard();
 startHealthChecks();
 startPolling();
 connectEvents();
+syncTracked();
 refreshAll().catch(() => {});

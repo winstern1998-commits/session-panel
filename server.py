@@ -14,8 +14,25 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parent
 PUBLIC = ROOT / "public"
+TRACKED_FILE = ROOT / "tracked.json"
 PANEL_PORT = int(os.environ.get("PANEL_PORT", "7878"))
 DEFAULT_OPENCODE_BASE_URL = "http://127.0.0.1:4097"
+
+
+def read_tracked() -> list[str]:
+    """Read tracked session IDs from tracked.json."""
+    try:
+        data = json.loads(TRACKED_FILE.read_text("utf-8"))
+        if isinstance(data, list):
+            return [s for s in data if isinstance(s, str)]
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return []
+
+
+def write_tracked(ids: list[str]) -> None:
+    """Write tracked session IDs to tracked.json."""
+    TRACKED_FILE.write_text(json.dumps(ids, ensure_ascii=False, indent=2), "utf-8")
 
 
 class OpenCodePanelHandler(BaseHTTPRequestHandler):
@@ -42,6 +59,9 @@ class OpenCodePanelHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/listdir":
             self.handle_listdir()
             return
+        if parsed.path == "/api/tracked":
+            self.send_json({"tracked": read_tracked()})
+            return
         if parsed.path.startswith("/api/session/"):
             session_id = self.extract_session_id(parsed.path)
             if session_id:
@@ -66,6 +86,20 @@ class OpenCodePanelHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+
+        if parsed.path == "/api/track":
+            body = self.read_json_body()
+            session_id = body.get("sessionId", "").strip()
+            if not session_id:
+                self.send_json({"error": "sessionId required"}, 400)
+                return
+            ids = read_tracked()
+            if session_id not in ids:
+                ids.append(session_id)
+                write_tracked(ids)
+            self.send_json({"ok": True, "tracked": ids})
+            return
+
         session_id = self.extract_session_id(parsed.path)
         if not session_id:
             self.send_json({"error": "Not found"}, 404)
@@ -88,6 +122,20 @@ class OpenCodePanelHandler(BaseHTTPRequestHandler):
             )
             return
 
+        self.send_json({"error": "Not found"}, 404)
+
+    def do_DELETE(self) -> None:
+        parsed = urlparse(self.path)
+        # DELETE /api/track/<session_id>
+        parts = parsed.path.strip("/").split("/")
+        if len(parts) == 3 and parts[0] == "api" and parts[1] == "track":
+            session_id = unquote(parts[2])
+            ids = read_tracked()
+            if session_id in ids:
+                ids.remove(session_id)
+                write_tracked(ids)
+            self.send_json({"ok": True, "tracked": ids})
+            return
         self.send_json({"error": "Not found"}, 404)
 
     def handle_sessions(self) -> None:
