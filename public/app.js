@@ -548,12 +548,14 @@ function effectiveRawStatus(id, rawStatus) {
     return live.status;
   }
   // Fallback: /session/status can miss active sessions (per-directory
-  // ScopedCache gaps). If the last message has completed=null the session
-  // is actively generating — treat as busy.
+  // ScopedCache gaps). If the last message has no completed timestamp
+  // the session is actively generating — treat as busy.
+  // Note: OpenCode omits the "completed" key entirely (not null) while
+  // generating, so we use == null to match both null and undefined.
   const snap = snapshots.get(id);
   if (snap?.messages?.length) {
     const lastMsg = snap.messages[snap.messages.length - 1];
-    if (lastMsg?.info?.time?.completed === null) {
+    if (lastMsg?.info?.time?.completed == null) {
       return { type: "busy" };
     }
   }
