@@ -8,7 +8,7 @@ const DEFAULT_BASE_URL = "http://127.0.0.1:4097";
 const OLD_DEFAULT_BASE_URL = "http://127.0.0.1:4096";
 
 const HEALTH_INTERVAL_MS = 8000;
-const POLL_INTERVAL_MS = 300000;
+const POLL_INTERVAL_MS = 120000;
 const SSE_BACKOFF = [1000, 2000, 4000, 8000, 16000, 30000];
 
 /* ---------- state ---------- */
@@ -70,7 +70,11 @@ async function checkStatuses() {
       const next = statuses[id] || null;
       const statusChanged = JSON.stringify(prev) !== JSON.stringify(next);
       const isBusy = next && (next.type === "busy" || next.type === "retry");
-      if (statusChanged || isBusy) {
+      // Fallback: /session/status can miss active sessions. If the
+      // effective status (with completed=null fallback) is busy but
+      // /session/status returned null, refresh to confirm.
+      const fallbackBusy = !next && isBusyRawStatus(effectiveRawStatus(id, null));
+      if (statusChanged || isBusy || fallbackBusy) {
         refreshSessionDebounced(id);
       }
     }
@@ -135,6 +139,7 @@ function loadState() {
     tabListWidth: null,
     sidebarCollapsed: false,
     readState: {},
+    serverSynced: false,
   };
   try {
     const loaded = { ...fallback, ...JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") };
@@ -167,6 +172,7 @@ function saveState() {
       tabListWidth: state.tabListWidth,
       sidebarCollapsed: state.sidebarCollapsed,
       readState: state.readState || {},
+      serverSynced: state.serverSynced || false,
     })
   );
 }
@@ -437,6 +443,7 @@ async function syncTracked() {
     const data = await api("/api/tracked");
     const serverIds = new Set(data.tracked || []);
     let changed = false;
+    // Add new server-tracked sessions to local
     for (const id of serverIds) {
       if (!tracked.has(id)) {
         tracked.set(id, { id, lane: "默认主线", note: "", importedAt: Date.now() });
@@ -444,10 +451,25 @@ async function syncTracked() {
         refreshSession(id).then(() => renderBoard()).catch(() => {});
       }
     }
-    for (const [id] of tracked) {
-      if (!serverIds.has(id)) {
-        api("/api/track", { method: "POST", body: JSON.stringify({ sessionId: id }) }).catch(() => {});
+    if (state.serverSynced) {
+      // Server is source of truth: remove local sessions not in server list
+      // (e.g. TUI removed them via DELETE /api/track/:id)
+      for (const [id] of tracked) {
+        if (!serverIds.has(id)) {
+          tracked.delete(id);
+          snapshots.delete(id);
+          changed = true;
+        }
       }
+    } else {
+      // First boot: one-time migration of localStorage → server
+      for (const [id] of tracked) {
+        if (!serverIds.has(id)) {
+          api("/api/track", { method: "POST", body: JSON.stringify({ sessionId: id }) }).catch(() => {});
+        }
+      }
+      state.serverSynced = true;
+      changed = true; // persist the flag
     }
     if (changed) {
       saveState();
@@ -524,6 +546,16 @@ function effectiveRawStatus(id, rawStatus) {
   const lastPoll = snapshots.get(id)?.checkedAt || 0;
   if (live && isBusyRawStatus(live.status) && live.seenAt > lastPoll) {
     return live.status;
+  }
+  // Fallback: /session/status can miss active sessions (per-directory
+  // ScopedCache gaps). If the last message has completed=null the session
+  // is actively generating — treat as busy.
+  const snap = snapshots.get(id);
+  if (snap?.messages?.length) {
+    const lastMsg = snap.messages[snap.messages.length - 1];
+    if (lastMsg?.info?.time?.completed === null) {
+      return { type: "busy" };
+    }
   }
   return rawStatus || null;
 }

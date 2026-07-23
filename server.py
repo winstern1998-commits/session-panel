@@ -188,9 +188,21 @@ class OpenCodePanelHandler(BaseHTTPRequestHandler):
             messages = self.opencode_json(f"/session/{encoded_id}/message?limit=20", fallback=[])
             todos = self.opencode_json(f"/session/{encoded_id}/todo", fallback=[])
             children = self.opencode_json(f"/session/{encoded_id}/children", fallback=[])
+
+            raw_status = status.get(session_id) if isinstance(status, dict) else None
+
+            # Fallback: /session/status can miss active sessions (per-directory
+            # ScopedCache gaps). If the last message has completed=None the
+            # session is actively generating — override to busy.
+            if not raw_status and isinstance(messages, list) and messages:
+                last_msg = messages[-1]
+                last_time = last_msg.get("info", {}).get("time", {}) if isinstance(last_msg, dict) else {}
+                if last_time.get("completed") is None:
+                    raw_status = {"type": "busy"}
+
             self.send_json({
                 "session": session,
-                "status": status.get(session_id) if isinstance(status, dict) else None,
+                "status": raw_status,
                 "messages": messages,
                 "todos": todos,
                 "children": children,
