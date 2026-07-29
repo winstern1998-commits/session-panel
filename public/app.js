@@ -33,6 +33,15 @@ let lastRemoteStatusMap = null;
 let watchDirDropdown = null;
 const refreshFromEvent = debounce(refreshAll, 500);
 
+/* Tools execution — per-session /tools response + live stopwatch tick.
+   Single poll timer (3s) fetches /tools for the selected session; a single
+   tick timer (1s) re-renders the section so the running stopwatch updates
+   every second without re-fetching. Both are cleared/restarted on selection
+   change via startToolsPolling() (idempotent — clears before setting). */
+const toolsState = new Map();
+let toolsPollTimer = null;
+let toolsTickTimer = null;
+
 /* Per-session debounced refresh — only re-fetches the session that changed,
    instead of refreshing all tracked sessions on every SSE event. */
 const refreshSessionTimers = new Map();
@@ -837,6 +846,7 @@ function renderBoard() {
       </div>
     `;
     renderSummary(0, 0, 0, 0, 0);
+    startToolsPolling();
     els.detailPanel.classList.add("board-ready");
     return;
   }
@@ -880,6 +890,8 @@ function renderBoard() {
   renderSummary(tracked.size, counts.working, counts.retrying, counts.idle);
   syncRemoteStatusesFromSnapshots();
   updateLaneOptions();
+  renderToolSection();
+  startToolsPolling();
   els.detailPanel.classList.add("board-ready");
 }
 
@@ -1087,6 +1099,10 @@ function renderDetail(item, snapshot, status) {
       ${lastMsg}
     </div>
     <div>
+      <div class="detail-section-label">工具执行</div>
+      <div class="tool-exec-section"></div>
+    </div>
+    <div>
       <div class="detail-section-label">Todos · ${todos.length}</div>
       <div class="todo-list">${todoHtml}</div>
     </div>
@@ -1132,6 +1148,106 @@ function renderDetail(item, snapshot, status) {
   });
 
   return card;
+}
+
+/* ============================================================
+   Tools execution section — running tool + live stopwatch,
+   last completed tool when idle, and nested sub-agent chain.
+   ============================================================ */
+async function refreshTools(id) {
+  if (!id) return;
+  try {
+    const data = await api(`/api/session/${encodeURIComponent(id)}/tools`);
+    toolsState.set(id, data);
+    renderToolSection();
+  } catch {
+    // Silent — keep stale data; tick will keep rendering the last known state.
+  }
+}
+
+function startToolsPolling() {
+  if (toolsPollTimer) { clearInterval(toolsPollTimer); toolsPollTimer = null; }
+  if (toolsTickTimer) { clearInterval(toolsTickTimer); toolsTickTimer = null; }
+  const id = state.selectedSession;
+  if (!id) return;
+  refreshTools(id);
+  toolsPollTimer = setInterval(() => {
+    if (state.selectedSession) refreshTools(state.selectedSession);
+  }, 3000);
+  // Tick only re-renders the stopwatch from cached toolsState — no requests.
+  toolsTickTimer = setInterval(renderToolSection, 1000);
+}
+
+function formatDuration(ms) {
+  if (ms == null || isNaN(ms)) return "";
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const sec = total % 60;
+  const min = Math.floor(total / 60) % 60;
+  const hr = Math.floor(total / 3600);
+  const pad = (n) => String(n).padStart(2, "0");
+  return hr > 0 ? `${hr}:${pad(min)}:${pad(sec)}` : `${min}:${pad(sec)}`;
+}
+
+function renderToolRow(tool, running) {
+  if (!tool) return "";
+  const cls = running ? "running" : "idle";
+  const dur = running
+    ? formatDuration(Date.now() - tool.start)
+    : formatDuration(tool.durationMs);
+  return `<div class="tool-row ${cls}">
+    <span class="tool-dot"></span>
+    <span class="tool-name">${escapeHtml(tool.tool || "")}</span>
+    <span class="tool-summary" title="${escapeHtml(tool.summary || "")}">${escapeHtml(tool.summary || "")}</span>
+    <span class="tool-dur">${escapeHtml(dur)}</span>
+  </div>`;
+}
+
+function renderToolChildren(children, depth) {
+  if (!children || !children.length) return "";
+  const items = children.map((child) => {
+    const tool = child.currentTool || child.lastTool;
+    const running = !!child.currentTool;
+    const idle = !child.currentTool && !child.lastTool;
+    const headerCls = idle ? "child-header idle" : "child-header";
+    let html = `<div class="tool-child depth-${depth}">`;
+    html += `<div class="${headerCls}">
+      <span class="child-agent">${escapeHtml(child.agent || "agent")}</span>
+      <span class="child-title" title="${escapeHtml(child.title || "")}">${escapeHtml(child.title || "")}</span>
+    </div>`;
+    if (tool) html += renderToolRow(tool, running);
+    if (child.active && child.children && child.children.length) {
+      html += renderToolChildren(child.children, depth + 1);
+    }
+    html += `</div>`;
+    return html;
+  }).join("");
+  return `<div class="tool-children">${items}</div>`;
+}
+
+function renderToolSection() {
+  const card = els.detailPanel.querySelector(".session-card");
+  if (!card) return;
+  const section = card.querySelector(".tool-exec-section");
+  if (!section) return;
+  const id = state.selectedSession;
+  if (!id) { section.innerHTML = ""; return; }
+  const data = toolsState.get(id);
+  if (!data) {
+    section.innerHTML = `<div class="tool-row empty">暂无工具记录</div>`;
+    return;
+  }
+  let html = "";
+  if (data.currentTool) {
+    html += renderToolRow(data.currentTool, true);
+  } else if (data.lastTool) {
+    html += renderToolRow(data.lastTool, false);
+  } else {
+    html += `<div class="tool-row empty">暂无工具记录</div>`;
+  }
+  if (data.children && data.children.length) {
+    html += renderToolChildren(data.children, 1);
+  }
+  section.innerHTML = html;
 }
 
 function syncRemoteStatusesFromSnapshots() {

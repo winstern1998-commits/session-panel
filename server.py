@@ -65,6 +65,9 @@ class OpenCodePanelHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/api/session/"):
             session_id = self.extract_session_id(parsed.path)
             if session_id:
+                if parsed.path.endswith("/tools"):
+                    self.handle_session_tools(session_id)
+                    return
                 self.handle_session_detail(session_id)
                 return
 
@@ -209,6 +212,210 @@ class OpenCodePanelHandler(BaseHTTPRequestHandler):
             })
         except Exception as exc:
             self.send_proxy_error(exc)
+
+    def handle_session_tools(self, session_id: str) -> None:
+        try:
+            node = self.build_tool_node(session_id, 0)
+            self.send_json(node)
+        except Exception as exc:
+            self.send_proxy_error(exc)
+
+    def build_tool_node(self, sid: str, depth: int, meta: Any = None) -> dict[str, Any]:
+        """Build a recursive tool-execution-stack node for a session."""
+        encoded = quote(sid, safe="")
+
+        # 1. Metadata: root node fetches its own; children receive meta from parent.
+        if meta is None:
+            meta = self.opencode_json(f"/session/{encoded}", fallback={})
+        if not isinstance(meta, dict):
+            meta = {}
+        title = meta.get("title") or ""
+        agent = meta.get("agent") or ""
+
+        # 2. Messages (limit=10).
+        raw_messages = self.opencode_json(f"/session/{encoded}/message?limit=10", fallback=[])
+        messages = self._unwrap_list(raw_messages)
+
+        # 3. Analyze tool parts.
+        current_tool, last_tool, active = self.analyze_tools(messages)
+
+        node: dict[str, Any] = {
+            "id": sid,
+            "title": title,
+            "agent": agent,
+            "active": active,
+            "currentTool": current_tool,
+            "lastTool": last_tool,
+            "children": [],
+        }
+
+        # 5. Children (depth-limited, only busy children recurse).
+        if depth < 5:
+            children_list = self._unwrap_list(
+                self.opencode_json(f"/session/{encoded}/children", fallback=[])
+            )
+            if isinstance(children_list, list):
+                status_map = self._collect_child_statuses(children_list)
+                for child in children_list[:20]:
+                    if not isinstance(child, dict) or not child.get("id"):
+                        continue
+                    try:
+                        child_status = status_map.get(child["id"])
+                        child_busy = isinstance(child_status, dict) and child_status.get("type") in ("busy", "retry")
+                        if child_busy:
+                            node["children"].append(
+                                self.build_tool_node(child["id"], depth + 1, meta=child)
+                            )
+                        else:
+                            node["children"].append({
+                                "id": child["id"],
+                                "title": child.get("title") or "",
+                                "agent": child.get("agent") or "",
+                                "active": False,
+                                "currentTool": None,
+                                "lastTool": None,
+                                "children": [],
+                            })
+                    except Exception:
+                        # Single child failure must not break the whole request.
+                        continue
+
+        return node
+
+    def _collect_child_statuses(self, children_list: list[Any]) -> dict[str, Any]:
+        """Query /session/status once per distinct child directory (per-directory scoped)."""
+        directories: set[str] = set()
+        for child in children_list:
+            if isinstance(child, dict) and child.get("directory"):
+                directories.add(child["directory"])
+        merged: dict[str, Any] = {}
+        for d in directories:
+            partial = self.opencode_json("/session/status", fallback={}, directory=d)
+            if isinstance(partial, dict):
+                merged.update(partial)
+        return merged
+
+    @staticmethod
+    def _unwrap_list(raw: Any) -> list[Any]:
+        """Normalize an opencode response that may be a list or a dict-wrapped list."""
+        if isinstance(raw, list):
+            return raw
+        if isinstance(raw, dict):
+            for key in ("data", "messages", "children"):
+                value = raw.get(key)
+                if isinstance(value, list):
+                    return value
+        return []
+
+    def analyze_tools(self, messages: Any) -> tuple[dict[str, Any] | None, dict[str, Any] | None, bool]:
+        """Extract currentTool / lastTool / active from the recent messages."""
+        current_tool: dict[str, Any] | None = None
+        last_tool: dict[str, Any] | None = None
+        if not isinstance(messages, list):
+            return None, None, False
+
+        try:
+            for msg in reversed(messages):
+                if not isinstance(msg, dict):
+                    continue
+                parts = msg.get("parts")
+                if not isinstance(parts, list):
+                    continue
+                for part in reversed(parts):
+                    if not isinstance(part, dict) or part.get("type") != "tool":
+                        continue
+                    state = part.get("state")
+                    if not isinstance(state, dict):
+                        continue
+                    status = state.get("status")
+                    tool_name = part.get("tool") or ""
+                    state_input = state.get("input")
+                    raw_time = state.get("time")
+                    time_obj = raw_time if isinstance(raw_time, dict) else {}
+                    start = time_obj.get("start")
+                    end = time_obj.get("end")
+
+                    if current_tool is None and status == "running":
+                        current_tool = {
+                            "tool": tool_name,
+                            "summary": self.derive_summary(tool_name, state_input),
+                            "status": "running",
+                            "start": start,
+                            "end": None,
+                        }
+                    elif last_tool is None and status in ("completed", "error"):
+                        duration = (end - start) if isinstance(start, (int, float)) and isinstance(end, (int, float)) else None
+                        last_tool = {
+                            "tool": tool_name,
+                            "summary": self.derive_summary(tool_name, state_input),
+                            "status": status,
+                            "start": start,
+                            "end": end,
+                            "durationMs": duration,
+                        }
+                    if current_tool is not None and last_tool is not None:
+                        break
+                if current_tool is not None and last_tool is not None:
+                    break
+        except Exception:
+            return None, None, False
+
+        # active: has a running tool, or last message is still generating.
+        active = current_tool is not None
+        if not active and messages:
+            last_msg = messages[-1]
+            if isinstance(last_msg, dict):
+                info = last_msg.get("info")
+                last_time = info.get("time", {}) if isinstance(info, dict) else {}
+                if last_time.get("completed") is None:
+                    active = True
+        return current_tool, last_tool, active
+
+    def derive_summary(self, tool: str, state_input: Any) -> str:
+        """Derive a short human-readable summary from a tool's input."""
+        try:
+            if not isinstance(state_input, dict):
+                if state_input is None:
+                    return ""
+                text = str(state_input)
+                return text if len(text) <= 100 else text[:100] + "…"
+
+            if tool in ("bash", "shell"):
+                text = str(state_input.get("command") or "")
+            elif tool in ("read", "write", "edit", "multiedit"):
+                text = str(state_input.get("filePath") or "")
+            elif tool == "glob":
+                text = str(state_input.get("pattern") or "")
+            elif tool == "grep":
+                pattern = str(state_input.get("pattern") or "")
+                include = state_input.get("include")
+                text = f"{pattern} ({include})" if include else pattern
+            elif tool == "task":
+                sub = str(state_input.get("subagent_type") or "")
+                desc = state_input.get("description")
+                if desc:
+                    desc_text = str(desc)
+                    text = f"{sub}: {desc_text}" if sub else desc_text
+                else:
+                    text = sub
+            elif tool in ("ast_grep_search", "ast_grep_replace"):
+                text = str(state_input.get("pattern") or "")
+            elif tool == "webfetch":
+                text = str(state_input.get("url") or "")
+            elif tool in ("websearch_web_search_exa", "websearch"):
+                text = str(state_input.get("query") or "")
+            elif tool == "todowrite":
+                text = "todos"
+            else:
+                first_val = next(iter(state_input.values()), "")
+                text = str(first_val) if first_val is not None else ""
+
+            text = " ".join(text.split())
+            if len(text) <= 100:
+                return text
+            return text[:100] + "…"
+        except Exception:
+            return ""
 
     def collect_statuses(self, sessions: Any) -> dict[str, Any]:
         """Aggregate /session/status across all session directories.
