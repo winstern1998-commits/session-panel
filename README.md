@@ -76,3 +76,7 @@ opencode serve --hostname 0.0.0.0 --port 4097 --cors http://127.0.0.1:7878
 ## 说明
 
 本项目只通过 opencode 官方 HTTP API 操作 session，不读取或修改 opencode 内部数据文件。
+
+## License
+
+[MIT](LICENSE)
